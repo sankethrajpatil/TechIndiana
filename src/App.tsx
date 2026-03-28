@@ -1,8 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { GoogleGenAI, Modality, Type, FunctionDeclaration } from "@google/genai";
 import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User } from 'firebase/auth';
-import { doc, setDoc, getDoc } from 'firebase/firestore';
-import { auth, db } from './firebase';
+import { auth } from './firebase';
 import { Mic, MicOff, LogIn, LogOut, BookOpen, Sparkles, Loader2, CheckCircle2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -179,15 +178,24 @@ export default function App() {
               for (const call of msg.toolCall.functionCalls) {
                 if (call.name === "save_user_details") {
                   try {
-                    await setDoc(doc(db, "users", user.uid), call.args);
-                    sessionRef.current?.sendToolResponse({
-                      functionResponses: [{
-                        name: "save_user_details",
-                        response: { success: true },
-                        id: call.id
-                      }]
+                    const response = await fetch(`/api/users/${user.uid}`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify(call.args)
                     });
-                    setTranscript(prev => [...prev, "System: Details saved successfully!"]);
+                    const result = await response.json();
+                    if (result.success) {
+                      sessionRef.current?.sendToolResponse({
+                        functionResponses: [{
+                          name: "save_user_details",
+                          response: { success: true },
+                          id: call.id
+                        }]
+                      });
+                      setTranscript(prev => [...prev, "System: Details saved successfully!"]);
+                    } else {
+                      throw new Error(result.error || 'Unknown error');
+                    }
                   } catch (err) {
                     console.error("Error saving details:", err);
                     sessionRef.current?.sendToolResponse({
