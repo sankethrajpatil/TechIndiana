@@ -1,0 +1,5 @@
+{
+  "name": "TechIndiana Advisor",
+  "description": "Voice-based academic advisor for TechIndiana students.",
+  "requestFramePermissions": ["microphone"]
+}

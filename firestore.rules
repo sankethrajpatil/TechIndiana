@@ -1,0 +1,36 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    // Collection: users
+    // Document ID: {userId}
+    // Fields:
+    //   - name: string (required)
+    //   - grade: string (required)
+    //   - areaOfInterest: string (required)
+    // ===============================================================
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['name', 'grade', 'areaOfInterest']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.grade is string && data.grade.size() > 0 && data.grade.size() < 50 &&
+             data.areaOfInterest is string && data.areaOfInterest.size() > 0 && data.areaOfInterest.size() < 100;
+    }
+
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create, update: if isOwner(userId) && isValidUser(request.resource.data);
+    }
+  }
+}
