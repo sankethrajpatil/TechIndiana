@@ -3,7 +3,7 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const http = require('http');
 const authRoutes = require('./routes/auth');
-const setupVoiceAgentServer = require('./voiceAgent');
+const { setupVoiceAgent } = require('./voiceAgent');
 require('dotenv').config();
 
 const app = express();
@@ -15,9 +15,9 @@ mongoose.connect(process.env.MONGO_URI, { useNewUrlParser: true, useUnifiedTopol
 app.use('/api', authRoutes);
 
 const server = http.createServer(app);
-setupVoiceAgentServer(server);
+setupVoiceAgent(server);
 
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 8080;
 server.listen(PORT, () => {
   console.log('Server running on port', PORT);
 });

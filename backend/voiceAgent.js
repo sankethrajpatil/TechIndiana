@@ -1,84 +1,71 @@
-const jwt = require('jsonwebtoken');
-const User = require('./models/User');
+const { WebSocketServer } = require('ws');
+const admin = require('./firebaseAdmin');
 const UserProfile = require('./models/UserProfile');
-const { GoogleGenerativeAI } = require('@google/genai');
-const WebSocket = require('ws');
+const { GoogleGenAI, Modality, Type } = require('@google/genai');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret';
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const wss = new WebSocketServer({ noServer: true });
 
-function setupVoiceAgentServer(server) {
-  const wss = new WebSocket.Server({ noServer: true });
+const saveUserProfileTool = {
+  name: 'save_user_profile',
+  description: 'Save user profile to database',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      name: { type: Type.STRING },
+      background: { type: Type.STRING },
+      expectations: { type: Type.STRING }
+    },
+    required: ['name', 'background', 'expectations']
+  }
+};
 
+function setupVoiceAgent(server) {
   server.on('upgrade', (req, socket, head) => {
-    if (req.url === '/api/voice-agent') {
+    if (req.url.startsWith('/api/voice-agent')) {
       wss.handleUpgrade(req, socket, head, ws => wss.emit('connection', ws, req));
     }
   });
 
   wss.on('connection', async (ws, req) => {
     try {
-      // 1. Authenticate user via JWT
-      const token = req.headers['sec-websocket-protocol'];
-      if (!token) return ws.close();
-      let payload;
-      try {
-        payload = jwt.verify(token, JWT_SECRET);
-      } catch {
-        ws.close();
-        return;
-      }
-      const userId = payload.userId;
+      const url = new URL(req.url, `http://${req.headers.host}`);
+      const idToken = url.searchParams.get('token');
+      if (!idToken) return ws.close();
 
-      // 2. Query UserProfile
-      let profile = await UserProfile.findOne({ user: userId });
-      let systemInstruction;
-      if (!profile) {
-        systemInstruction = `User Context: None. Greet the user, ask for their name, background, and expectations from TechIndiana, then trigger the save_user_profile tool.`;
-      } else {
-        systemInstruction = `User Context: ${JSON.stringify(profile)}. Welcome them back by name, reference their background/study plan, and ask what they want to focus on today. Do not ask for their basic details again.`;
-      }
+      const decoded = await admin.auth().verifyIdToken(idToken);
+      const firebaseUid = decoded.uid;
 
-      // 3. Connect to Gemini 3.1 Flash Live API
-      const genai = new GoogleGenerativeAI(GEMINI_API_KEY);
-      const geminiSocket = await genai.live.connect({
+      let profile = await UserProfile.findOne({ firebaseUid });
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const systemInstruction = profile
+        ? `Welcome back, ${profile.name}! Your background: ${profile.background}. What do you want to study today?`
+        : `Welcome to TechIndiana! Please tell me your name, background, and expectations.`;
+
+      const session = await ai.live.connect({
         model: 'gemini-3.1-flash-live-preview',
         config: {
+          responseModalities: [Modality.AUDIO],
           systemInstruction,
-          tools: [{
-            functionDeclarations: [{
-              name: 'save_user_profile',
-              description: 'Saves the user profile to MongoDB.',
-              parameters: {
-                type: 'OBJECT',
-                properties: {
-                  name: { type: 'STRING' },
-                  background: { type: 'STRING' },
-                  expectations: { type: 'STRING' }
-                },
-                required: ['name', 'background', 'expectations']
-              }
-            }]
-          }]
+          tools: [{ functionDeclarations: [saveUserProfileTool] }],
+          outputAudioTranscription: {},
+          inputAudioTranscription: {},
         },
         callbacks: {
-          onopen: () => ws.send(JSON.stringify({ type: 'ready' })),
-          onmessage: async msg => {
-            ws.send(JSON.stringify({ type: 'ai', data: msg }));
+          onopen: () => ws.send(JSON.stringify({ type: 'ai', text: 'Connected to Gemini.' })),
+          onmessage: async (msg) => {
+            if (msg.serverContent?.interrupted) {
+              ws.send(JSON.stringify({ type: 'barge-in' }));
+            }
             if (msg.toolCall) {
               for (const call of msg.toolCall.functionCalls) {
                 if (call.name === 'save_user_profile') {
+                  const { name, background, expectations } = call.args;
                   await UserProfile.findOneAndUpdate(
-                    { user: userId },
-                    {
-                      user: userId,
-                      name: call.args.name,
-                      background: call.args.background,
-                      expectations: call.args.expectations
-                    },
+                    { firebaseUid },
+                    { name, background, expectations },
                     { upsert: true }
                   );
-                  geminiSocket.sendToolResponse({
+                  session.sendToolResponse({
                     functionResponses: [{
                       name: 'save_user_profile',
                       response: { success: true },
@@ -88,21 +75,23 @@ function setupVoiceAgentServer(server) {
                 }
               }
             }
-          },
-          onclose: () => ws.close(),
-          onerror: () => ws.close()
+            // Handle AI text/audio responses as needed
+          }
         }
       });
 
-      ws.on('message', data => {
-        geminiSocket.sendRealtimeInput(JSON.parse(data));
+      ws.on('message', (data) => {
+        const { audio } = JSON.parse(data);
+        if (audio) {
+          session.sendRealtimeInput([{ mimeType: 'audio/pcm;rate=16000', data: audio }]);
+        }
       });
 
-      ws.on('close', () => geminiSocket.close());
+      ws.on('close', () => session.close());
     } catch (err) {
       ws.close();
     }
   });
 }
 
-module.exports = setupVoiceAgentServer;
+module.exports = { setupVoiceAgent };

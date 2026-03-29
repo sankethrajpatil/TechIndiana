@@ -11,7 +11,15 @@ app.use(cors());
 const port = process.env.PORT || 5000;
 app.use(express.json());
 
-// We'll connect and start the server below to ensure DB is ready before accepting requests.
+
+// Connect to DB and start server
+connectToDatabase().then(() => {
+  app.listen(port, () => {
+    console.log(`Server listening on port ${port}`);
+  });
+}).catch((err) => {
+  console.error('Failed to connect to database:', err);
+});
 
 // API: Save user details
 app.post('/api/users/:userId', async (req, res) => {
@@ -41,6 +49,41 @@ app.get('/api/users/:userId', async (req, res) => {
     const user = await db.collection('users').findOne({ userId });
     if (!user) return res.status(404).json({ error: 'User not found' });
     res.json(user);
+  } catch (err) {
+    res.status(500).json({ error: 'Database error' });
+  }
+});
+
+
+
+// User registration endpoint
+app.post('/api/register', async (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password) {
+    return res.status(400).json({ error: 'Username and password required' });
+  }
+  try {
+    const db = getDB();
+    const existing = await db.collection('users').findOne({ username });
+    if (existing) return res.status(400).json({ error: 'Username already exists' });
+    await db.collection('users').insertOne({ username, password });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Database error' });
+  }
+});
+
+// User login endpoint
+app.post('/api/login', async (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password) {
+    return res.status(400).json({ error: 'Username and password required' });
+  }
+  try {
+    const db = getDB();
+    const user = await db.collection('users').findOne({ username, password });
+    if (!user) return res.status(401).json({ error: 'Invalid credentials' });
+    res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: 'Database error' });
   }
