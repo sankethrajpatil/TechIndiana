@@ -1,15 +1,10 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+
+import { useState, useRef, useCallback } from 'react';
 import { GoogleGenAI, Modality, Type, FunctionDeclaration } from "@google/genai";
-import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User } from 'firebase/auth';
-import { auth } from './firebase';
 import { Mic, MicOff, LogIn, LogOut, BookOpen, Sparkles, Loader2, CheckCircle2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import HeroSection from './components/HeroSection';
-import PersonaCards from './components/PersonaCards';
 import ProgramsPage from './components/ProgramsPage';
 import PersonaPage from './components/PersonaPage';
-import VoiceAgentPanel from './components/VoiceAgentPanel';
-import Footer from './components/Footer';
 
 // --- Audio Helpers ---
 const SAMPLE_RATE = 16000;
@@ -82,31 +77,52 @@ export default function App() {
   const audioQueueRef = useRef<AudioBuffer[]>([]);
   const isPlayingRef = useRef(false);
 
-  // --- Firebase Auth ---
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (u) => {
-      setUser(u);
-    });
-    return () => unsubscribe();
-  }, []);
 
+  // --- Username/Password Auth ---
   const handleLogin = async () => {
+    setLoginLoading(true);
+    setLoginError(null);
     try {
-      const provider = new GoogleAuthProvider();
-      await signInWithPopup(auth, provider);
+      const res = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(loginForm)
+      });
+      const data = await res.json();
+      if (data.success) {
+        setUser({ username: loginForm.username });
+      } else {
+        setLoginError(data.error || 'Login failed');
+      }
     } catch (err) {
-      setError("Login failed. Please try again.");
-      console.error(err);
+      setLoginError('Login failed');
     }
+    setLoginLoading(false);
+  };
+
+  const handleRegister = async () => {
+    setLoginLoading(true);
+    setLoginError(null);
+    try {
+      const res = await fetch('/api/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(registerForm)
+      });
+      const data = await res.json();
+      if (data.success) {
+        setUser({ username: registerForm.username });
+      } else {
+        setLoginError(data.error || 'Registration failed');
+      }
+    } catch (err) {
+      setLoginError('Registration failed');
+    }
+    setLoginLoading(false);
   };
 
   const handleLogout = async () => {
     setUser(null);
-    await stopConversation();
-  };
-
-  const handleLogout = async () => {
-    await auth.signOut();
     await stopConversation();
   };
 
@@ -333,12 +349,8 @@ export default function App() {
         {user ? (
           <div className="flex items-center gap-4">
             <div className="hidden sm:flex flex-col items-end">
-              <span className="text-sm font-medium">{user.displayName}</span>
-              <span className="text-[10px] text-white/40">Student ID: {user.uid.slice(0, 8)}</span>
+              <span className="text-sm font-medium">{user.username}</span>
             </div>
-            {/* Navigation removed - AI advisor is the primary path */}
-            {/* Data panel toggle - minimal UI to access live API data without redesigning */}
-            {/* Data panel removed from header */}
             <button 
               onClick={handleLogout}
               className="p-2 hover:bg-white/10 rounded-full transition-colors group"
@@ -348,13 +360,68 @@ export default function App() {
             </button>
           </div>
         ) : (
-          <button 
-            onClick={handleLogin}
-            className="flex items-center gap-2 bg-white text-black px-4 py-2 rounded-full font-semibold hover:bg-orange-500 hover:text-white transition-all active:scale-95"
-          >
-            <LogIn className="w-4 h-4" />
-            Login with Google
-          </button>
+          <div className="flex flex-col gap-2 w-64">
+            {isRegistering ? (
+              <>
+                <input
+                  className="px-3 py-2 rounded bg-white/10 text-white"
+                  placeholder="Username"
+                  value={registerForm.username}
+                  onChange={e => setRegisterForm(f => ({ ...f, username: e.target.value }))}
+                />
+                <input
+                  className="px-3 py-2 rounded bg-white/10 text-white"
+                  placeholder="Password"
+                  type="password"
+                  value={registerForm.password}
+                  onChange={e => setRegisterForm(f => ({ ...f, password: e.target.value }))}
+                />
+                <button
+                  onClick={handleRegister}
+                  className="bg-white text-black px-4 py-2 rounded-full font-semibold hover:bg-orange-500 hover:text-white transition-all active:scale-95"
+                  disabled={loginLoading}
+                >
+                  {loginLoading ? 'Registering...' : 'Register'}
+                </button>
+                <button
+                  onClick={() => setIsRegistering(false)}
+                  className="text-xs text-orange-400 hover:underline"
+                >
+                  Already have an account? Login
+                </button>
+              </>
+            ) : (
+              <>
+                <input
+                  className="px-3 py-2 rounded bg-white/10 text-white"
+                  placeholder="Username"
+                  value={loginForm.username}
+                  onChange={e => setLoginForm(f => ({ ...f, username: e.target.value }))}
+                />
+                <input
+                  className="px-3 py-2 rounded bg-white/10 text-white"
+                  placeholder="Password"
+                  type="password"
+                  value={loginForm.password}
+                  onChange={e => setLoginForm(f => ({ ...f, password: e.target.value }))}
+                />
+                <button
+                  onClick={handleLogin}
+                  className="bg-white text-black px-4 py-2 rounded-full font-semibold hover:bg-orange-500 hover:text-white transition-all active:scale-95"
+                  disabled={loginLoading}
+                >
+                  {loginLoading ? 'Logging in...' : 'Login'}
+                </button>
+                <button
+                  onClick={() => setIsRegistering(true)}
+                  className="text-xs text-orange-400 hover:underline"
+                >
+                  New user? Register
+                </button>
+              </>
+            )}
+            {loginError && <div className="text-red-400 text-xs mt-1">{loginError}</div>}
+          </div>
         )}
       </header>
 
@@ -362,7 +429,10 @@ export default function App() {
 
       <main className="max-w-4xl mx-auto px-6 py-12">
         {!user ? (
-          <HeroSection onStart={handleLogin} />
+          <div className="flex flex-col items-center justify-center min-h-[400px]">
+            <h2 className="text-2xl font-bold mb-4">Welcome to TechIndiana</h2>
+            <p className="text-white/60 mb-2">Login or register to start your session with the AI advisor.</p>
+          </div>
         ) : (
           <>
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
