@@ -1,4 +1,3 @@
-
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
@@ -42,6 +41,34 @@ app.get('/api/users/:userId', async (req, res) => {
     const user = await db.collection('users').findOne({ userId });
     if (!user) return res.status(404).json({ error: 'User not found' });
     res.json(user);
+  } catch (err) {
+    res.status(500).json({ error: 'Database error' });
+  }
+});
+
+// API: Update user details
+app.put('/api/users/:userId', async (req, res) => {
+  const { userId } = req.params;
+  const { name, grade, areaOfInterest } = req.body;
+  try {
+    const result = await db.collection('users').updateOne(
+      { userId },
+      { $set: { name, grade, areaOfInterest } }
+    );
+    if (result.matchedCount === 0) return res.status(404).json({ error: 'User not found' });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Database error' });
+  }
+});
+
+// API: Delete user
+app.delete('/api/users/:userId', async (req, res) => {
+  const { userId } = req.params;
+  try {
+    const result = await db.collection('users').deleteOne({ userId });
+    if (result.deletedCount === 0) return res.status(404).json({ error: 'User not found' });
+    res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: 'Database error' });
   }
