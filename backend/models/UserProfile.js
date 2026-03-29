@@ -5,7 +5,8 @@ const userProfileSchema = new mongoose.Schema({
   name: String,
   background: String,
   expectations: String,
-  study_plan: String
+  study_plan: String,
+  conversation_summary: String
 });
 
 module.exports = mongoose.model('UserProfile', userProfileSchema);

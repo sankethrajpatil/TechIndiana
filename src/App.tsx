@@ -1,5 +1,12 @@
 
 import { useState, useRef, useCallback } from 'react';
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+// Persona landing page placeholders
+function StudentPage() { return <div className="p-12 text-center text-2xl">Welcome, Student!</div>; }
+function ParentPage() { return <div className="p-12 text-center text-2xl">Welcome, Parent!</div>; }
+function AdultLearnerPage() { return <div className="p-12 text-center text-2xl">Welcome, Adult Learner!</div>; }
+function EmployerPage() { return <div className="p-12 text-center text-2xl">Welcome, Employer!</div>; }
+function CounselorPage() { return <div className="p-12 text-center text-2xl">Welcome, Counselor!</div>; }
 import { GoogleGenAI, Modality, Type, FunctionDeclaration } from "@google/genai";
 import { Mic, MicOff, LogIn, LogOut, BookOpen, Sparkles, Loader2, CheckCircle2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -333,7 +340,15 @@ export default function App() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] text-white font-sans selection:bg-orange-500/30">
+    <Router>
+    <Routes>
+      <Route path="/students" element={<StudentPage />} />
+      <Route path="/parents" element={<ParentPage />} />
+      <Route path="/adult-learners" element={<AdultLearnerPage />} />
+      <Route path="/employers" element={<EmployerPage />} />
+      <Route path="/counselors" element={<CounselorPage />} />
+      <Route path="/*" element={
+        <div className="min-h-screen bg-[#0a0a0a] text-white font-sans selection:bg-orange-500/30">
       {/* Header */}
       <header className="border-b border-white/10 px-6 py-4 flex justify-between items-center backdrop-blur-md sticky top-0 z-50">
         <div className="flex items-center gap-2">
@@ -623,6 +638,9 @@ export default function App() {
           background: rgba(255, 255, 255, 0.2);
         }
       `}</style>
-    </div>
+        </div>
+      } />
+    </Routes>
+    </Router>
   );
 }
