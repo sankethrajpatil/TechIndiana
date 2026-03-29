@@ -1,7 +1,8 @@
 import express from 'express';
 import cors from 'cors';
-import { MongoClient } from 'mongodb';
 import dotenv from 'dotenv';
+import { connectToDatabase, getDB } from './db.js';
+import * as techService from './services/techIndianaService.js';
 
 dotenv.config();
 
@@ -10,22 +11,7 @@ app.use(cors());
 const port = process.env.PORT || 5000;
 app.use(express.json());
 
-const uri = process.env.MONGODB_URI;
-if (!uri) throw new Error('MONGODB_URI not set in .env');
-const client = new MongoClient(uri);
-let db;
-
-async function connectDB() {
-  try {
-    await client.connect();
-    db = client.db();
-    console.log('Connected to MongoDB');
-  } catch (err) {
-    console.error('MongoDB connection error:', err);
-    process.exit(1);
-  }
-}
-connectDB();
+// We'll connect and start the server below to ensure DB is ready before accepting requests.
 
 // API: Save user details
 app.post('/api/users/:userId', async (req, res) => {
@@ -35,6 +21,7 @@ app.post('/api/users/:userId', async (req, res) => {
     return res.status(400).json({ error: 'Missing required fields' });
   }
   try {
+    const db = getDB();
     await db.collection('users').updateOne(
       { userId },
       { $set: { name, grade, areaOfInterest } },
@@ -50,6 +37,7 @@ app.post('/api/users/:userId', async (req, res) => {
 app.get('/api/users/:userId', async (req, res) => {
   const { userId } = req.params;
   try {
+    const db = getDB();
     const user = await db.collection('users').findOne({ userId });
     if (!user) return res.status(404).json({ error: 'User not found' });
     res.json(user);
@@ -58,12 +46,67 @@ app.get('/api/users/:userId', async (req, res) => {
   }
 });
 
-app.get('/', (req, res) => {
-  res.send('MongoDB connection established!');
+// API: Update user details
+app.put('/api/users/:userId', async (req, res) => {
+  const { userId } = req.params;
+  const { name, grade, areaOfInterest } = req.body;
+  try {
+    const result = await db.collection('users').updateOne(
+      { userId },
+      { $set: { name, grade, areaOfInterest } }
+    );
+    if (result.matchedCount === 0) return res.status(404).json({ error: 'User not found' });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Database error' });
+  }
 });
 
-app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
+// API: Delete user
+app.delete('/api/users/:userId', async (req, res) => {
+  const { userId } = req.params;
+  try {
+    const result = await db.collection('users').deleteOne({ userId });
+    if (result.deletedCount === 0) return res.status(404).json({ error: 'User not found' });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Database error' });
+  }
+});
+
+app.get('/', (req, res) => {
+  res.send('TechIndiana API server');
+});
+
+// TechIndiana API endpoints
+app.get('/api/personas', async (req, res) => {
+  try {
+    const data = await techService.getPersonas();
+    res.json(data);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch personas' });
+  }
+});
+
+app.get('/api/programs', async (req, res) => {
+  try {
+    const data = await techService.getPrograms();
+    res.json(data);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch programs' });
+  }
+});
+
+app.get('/api/careers', async (req, res) => {
+  try {
+    const data = await techService.getCareerTracks();
+    res.json(data);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch career tracks' });
+  }
 });
 
 // --- Gemini Function Calling Endpoints ---
