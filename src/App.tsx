@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { GoogleGenAI, Modality, Type, FunctionDeclaration } from "@google/genai";
-import { signInWithPopup, signInWithRedirect, getRedirectResult, GoogleAuthProvider, onAuthStateChanged, User } from 'firebase/auth';
+import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User } from 'firebase/auth';
 import { auth } from './firebase';
 import { Mic, MicOff, LogIn, LogOut, BookOpen, Sparkles, Loader2, CheckCircle2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -51,7 +51,10 @@ const saveUserDetailsDeclaration: FunctionDeclaration = {
 };
 
 export default function App() {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState(null);
+  const [loginForm, setLoginForm] = useState({ username: '', password: '' });
+  const [registerForm, setRegisterForm] = useState({ username: '', password: '' });
+  const [isRegistering, setIsRegistering] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
@@ -87,111 +90,19 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // Handle redirect sign-in results (used when popup fails and we fall back to redirect)
-  useEffect(() => {
-    (async () => {
-      try {
-        const result = await getRedirectResult(auth);
-        if (result) {
-          // A successful redirect sign-in completed. Clear any prior login errors.
-          setLoginError(null);
-          setLoginLoading(false);
-          console.log('Redirect sign-in result:', result);
-        }
-      } catch (err: any) {
-        console.error('getRedirectResult error:', err);
-        // Surface a helpful error message for unauthorized domain which is common in dev
-        if (err?.code === 'auth/unauthorized-domain') {
-          setLoginError('Unauthorized domain. Add this origin to Firebase Console -> Authentication -> Authorized domains (e.g. localhost:3000)');
-        } else {
-          setLoginError(err?.message || String(err));
-        }
-        setLoginLoading(false);
-      }
-    })();
-  }, []);
-
-  // When a user signs in, prefetch personas and programs for the UI
-  useEffect(() => {
-    if (!user) return;
-    fetchPersonas();
-    fetchPrograms();
-  }, [user]);
-
-  async function fetchPersonas() {
-    setLoadingPersonas(true);
-    setDataError(null);
-    try {
-      const res = await fetch('/api/personas');
-      if (!res.ok) throw new Error(`Failed to load personas: ${res.status}`);
-      const data = await res.json();
-      setPersonas(data || []);
-    } catch (err: any) {
-      console.error(err);
-      setDataError(err.message || 'Error fetching personas');
-    } finally {
-      setLoadingPersonas(false);
-    }
-  }
-
-  async function fetchPrograms() {
-    setLoadingPrograms(true);
-    setDataError(null);
-    try {
-      const res = await fetch('/api/programs');
-      if (!res.ok) throw new Error(`Failed to load programs: ${res.status}`);
-      const data = await res.json();
-      setPrograms(data || []);
-    } catch (err: any) {
-      console.error(err);
-      setDataError(err.message || 'Error fetching programs');
-    } finally {
-      setLoadingPrograms(false);
-    }
-  }
-
-  async function fetchPersonaBundle(persona: string) {
-    setSelectedPersona(persona);
-    setLoadingBundle(true);
-    setPersonaBundle(null);
-    setDataError(null);
-    try {
-      const res = await fetch(`/api/persona-bundle/${encodeURIComponent(persona)}`);
-      if (!res.ok) throw new Error(`Failed to load persona bundle: ${res.status}`);
-      const data = await res.json();
-      setPersonaBundle(data);
-      // quick console log for debugging
-      console.log('Persona bundle loaded', data);
-    } catch (err: any) {
-      console.error(err);
-      setDataError(err.message || 'Error fetching persona bundle');
-    } finally {
-      setLoadingBundle(false);
-    }
-  }
-
   const handleLogin = async () => {
-    setLoginLoading(true);
-    setLoginError(null);
     try {
       const provider = new GoogleAuthProvider();
       await signInWithPopup(auth, provider);
-    } catch (err: any) {
-      console.error('Popup login error:', err);
-      // If popup fails (blocked/closed), fall back to redirect flow
-      const msg = err?.message || String(err);
-      setLoginError(msg);
-      try {
-        // fallback to redirect which works when popups are blocked
-        const provider = new GoogleAuthProvider();
-        await signInWithRedirect(auth, provider);
-      } catch (redirectErr) {
-        console.error('Redirect login error:', redirectErr);
-        setLoginError(String(redirectErr));
-      }
-    } finally {
-      setLoginLoading(false);
+    } catch (err) {
+      setError("Login failed. Please try again.");
+      console.error(err);
     }
+  };
+
+  const handleLogout = async () => {
+    setUser(null);
+    await stopConversation();
   };
 
   const handleLogout = async () => {
@@ -437,19 +348,13 @@ export default function App() {
             </button>
           </div>
         ) : (
-          <div className="flex items-center gap-3">
-            <button 
-              onClick={handleLogin}
-              disabled={loginLoading}
-              className="flex items-center gap-2 bg-white text-black px-4 py-2 rounded-full font-semibold hover:bg-orange-500 hover:text-white transition-all active:scale-95"
-            >
-              <LogIn className="w-4 h-4" />
-              {loginLoading ? 'Signing in...' : 'Login with Google'}
-            </button>
-            {loginError && (
-              <div className="text-xs text-red-400">{loginError}</div>
-            )}
-          </div>
+          <button 
+            onClick={handleLogin}
+            className="flex items-center gap-2 bg-white text-black px-4 py-2 rounded-full font-semibold hover:bg-orange-500 hover:text-white transition-all active:scale-95"
+          >
+            <LogIn className="w-4 h-4" />
+            Login with Google
+          </button>
         )}
       </header>
 
