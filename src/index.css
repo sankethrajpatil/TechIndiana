@@ -1,1 +1,47 @@
 @import "tailwindcss";
+
+@theme {
+  --color-ai-purple: #4A4F76;
+  --color-ai-glow: rgba(74, 79, 118, 0.5);
+}
+
+@layer base {
+  :root {
+    --bg-primary: #ffffff;
+    --bg-secondary: #f8fafc;
+    --text-primary: #0f172a;
+    --text-secondary: #475569;
+    --border-color: rgba(15, 23, 42, 0.1);
+    --glass-bg: rgba(255, 255, 255, 0.7);
+    --glass-border: rgba(15, 23, 42, 0.1);
+  }
+
+  .dark {
+    --bg-primary: #0f172a;
+    --bg-secondary: #1e293b;
+    --text-primary: #f8fafc;
+    --text-secondary: #94a3b8;
+    --border-color: rgba(248, 250, 252, 0.1);
+    --glass-bg: rgba(15, 23, 42, 0.7);
+    --glass-border: rgba(248, 250, 252, 0.1);
+  }
+
+  body {
+    @apply bg-[var(--bg-primary)] text-[var(--text-primary)] transition-colors duration-300;
+  }
+}
+
+@layer components {
+  .glass-effect {
+    @apply backdrop-blur-md bg-[var(--glass-bg)] border border-[var(--glass-border)];
+  }
+
+  .ai-card {
+    @apply border-ai-purple/20 bg-ai-purple/5 shadow-lg;
+  }
+
+  .dark .ai-card {
+    @apply shadow-[0_0_20px_var(--color-ai-glow)];
+  }
+}
+
