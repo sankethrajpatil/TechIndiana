@@ -101,6 +101,8 @@ function VoiceAgent() {
   const [transcript, setTranscript] = useState<string[]>([]);
   const [studyPlan, setStudyPlan] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [scheduledMeetingLink, setScheduledMeetingLink] = useState<string | null>(null);
+  const [comparisonData, setComparisonData] = useState<{ metric: string, apprenticeship_value: string, college_value: string }[] | null>(null);
 
   const audioContextRef = useRef<AudioContext | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -278,6 +280,10 @@ function VoiceAgent() {
         } else if (msg.type === 'ui_redirect') {
           console.log(`Navigating to: ${msg.route}`);
           navigate(msg.route);
+        } else if (msg.type === 'meeting_scheduled') {
+          setScheduledMeetingLink(msg.event_link);
+        } else if (msg.type === 'render_comparison') {
+          setComparisonData(msg.data);
         }
       };
 
@@ -437,6 +443,81 @@ function VoiceAgent() {
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
             {/* Advisor Interaction Area */}
             <div className="lg:col-span-7 space-y-6">
+              <AnimatePresence>
+                {comparisonData && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -20 }}
+                    className="bg-white text-black rounded-3xl p-8 space-y-6 shadow-2xl relative overflow-hidden"
+                  >
+                    <div className="flex justify-between items-center relative z-10">
+                      <div>
+                        <h3 className="text-2xl font-black tracking-tight">Pathway Comparison</h3>
+                        <p className="text-black/50 text-sm">TechIndiana vs. Traditional 4-Year College</p>
+                      </div>
+                      <button 
+                        onClick={() => setComparisonData(null)}
+                        className="bg-black/5 hover:bg-black/10 p-2 rounded-full transition-colors"
+                      >
+                        <LogOut className="w-5 h-5 rotate-180" />
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-4 relative z-10">
+                      <div className="col-span-1 text-xs font-bold uppercase tracking-widest text-black/40 pt-4">Metric</div>
+                      <div className="col-span-1 text-xs font-bold uppercase tracking-widest text-orange-600 pt-4">Apprenticeship</div>
+                      <div className="col-span-1 text-xs font-bold uppercase tracking-widest text-black/40 pt-4">4-Year College</div>
+                      
+                      {comparisonData.map((row, i) => (
+                        <div key={i} className="contents group">
+                          <div className="col-span-1 py-3 border-t border-black/5 font-bold text-sm flex items-center">{row.metric}</div>
+                          <div className="col-span-1 py-3 border-t border-black/5 text-sm font-medium bg-orange-50 -mx-2 px-2 rounded-lg">{row.apprenticeship_value}</div>
+                          <div className="col-span-1 py-3 border-t border-black/5 text-sm text-black/60">{row.college_value}</div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="absolute top-0 right-0 w-32 h-32 bg-orange-500/10 blur-3xl rounded-full -mr-16 -mt-16"></div>
+                  </motion.div>
+                )}
+                
+                {scheduledMeetingLink && (
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.9, y: -20 }}
+                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.9, y: 20 }}
+                    className="bg-green-600/90 backdrop-blur-md border border-green-500/50 rounded-2xl p-6 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-xl"
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className="bg-white/20 p-2 rounded-lg">
+                        <CheckCircle2 className="w-6 h-6 text-white" />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-white">Meeting Confirmed!</h4>
+                        <p className="text-white/80 text-xs">Your call has been added to the calendar.</p>
+                      </div>
+                    </div>
+                    <div className="flex gap-3">
+                      <a 
+                        href={scheduledMeetingLink} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="bg-white text-green-700 px-5 py-2 rounded-full font-bold text-sm hover:bg-green-50 transition-all shadow-md"
+                      >
+                        View Calendar Invite
+                      </a>
+                      <button 
+                        onClick={() => setScheduledMeetingLink(null)}
+                        className="text-white/60 hover:text-white text-xs underline"
+                      >
+                        Dismiss
+                      </button>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
               <div className="bg-white/5 border border-white/10 rounded-3xl p-8 relative overflow-hidden min-h-[400px] flex flex-col justify-center items-center text-center">
                 <AnimatePresence mode="wait">
                   {!isConnected ? (

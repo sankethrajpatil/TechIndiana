@@ -9,6 +9,8 @@ import { createServer as createViteServer } from 'vite';
 import UserProfile from './src/models/UserProfile';
 import { firebaseAuthMiddleware, verifyWebSocketToken } from './src/middleware/auth';
 import sessionRouter from './server/routes/session';
+import { createCalendarEvent } from './server/services/calendarService';
+import { sendResourceEmail } from './server/services/emailService';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -218,6 +220,90 @@ async function startServer() {
     }
   };
 
+  const schedulePartnershipCallTool: FunctionDeclaration = {
+    name: "schedule_partnership_call",
+    description: "Books a talent pipeline partnership call for an interested IT employer with the TechIndiana team.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        company_name: { type: Type.STRING, description: "The name of the company." },
+        contact_name: { type: Type.STRING, description: "The name of the contact person." },
+        preferred_date: { type: Type.STRING, description: "The date of the call (format YYYY-MM-DD)." },
+        preferred_time: { type: Type.STRING, description: "The time of the call (e.g., '10:00 AM')." }
+      },
+      required: ["company_name", "contact_name", "preferred_date", "preferred_time"]
+    }
+  };
+
+  const scheduleAdvisorCallTool: FunctionDeclaration = {
+    name: "schedule_advisor_call",
+    description: "Books a 1-on-1 TechIndiana advisor call for a parent or student to discuss apprenticeship pathways.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        attendee_name: { type: Type.STRING, description: "The name of the parent or student." },
+        topic: { type: Type.STRING, description: "The topic to discuss during the call." },
+        preferred_date: { type: Type.STRING, description: "The date of the advisor call (format YYYY-MM-DD)." },
+        preferred_time: { type: Type.STRING, description: "The time of the advisor call (e.g., '2:30 PM')." }
+      },
+      required: ["attendee_name", "topic", "preferred_date", "preferred_time"]
+    }
+  };
+
+  const sendCounselorToolkitTool: FunctionDeclaration = {
+    name: "send_counselor_toolkit",
+    description: "Sends the TechIndiana Counselor Toolkit (student one-pager, parent letter, program FAQ, and academic timeline) to the user's email address.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {}
+    }
+  };
+
+  const sendParentGuideTool: FunctionDeclaration = {
+    name: "send_parent_guide",
+    description: "Sends the Parent's Guide to TechIndiana (program structure, employer directory, safety standards, and college comparison) to the user's email address.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {}
+    }
+  };
+
+  const assessAdultSkillsTool: FunctionDeclaration = {
+    name: "assess_adult_skills",
+    description: "Assesses an adult learner's prior work experience to map them to an accelerated IT apprenticeship pathway and timeline.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        current_role: { type: Type.STRING, description: "The user's current job role." },
+        past_experience: { type: Type.STRING, description: "Detailed description of the user's past work experience." }
+      },
+      required: ["current_role", "past_experience"]
+    }
+  };
+
+  const showPathwayComparisonTool: FunctionDeclaration = {
+    name: "show_pathway_comparison",
+    description: "Pushes a visual, side-by-side comparison of the TechIndiana Apprenticeship vs. Traditional 4-Year College to the user's screen. Use this when a parent asks how the program compares to college, or asks about costs, timelines, and outcomes.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        comparison_points: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              metric: { type: Type.STRING, description: "The metric being compared (e.g., 'Cost', 'Experience')." },
+              apprenticeship_value: { type: Type.STRING, description: "The value/benefit for the apprenticeship pathway." },
+              college_value: { type: Type.STRING, description: "The value/cost for the traditional college pathway." }
+            },
+            required: ["metric", "apprenticeship_value", "college_value"]
+          }
+        }
+      },
+      required: ["comparison_points"]
+    }
+  };
+
   wss.on('connection', async (ws: WebSocket, request: http.IncomingMessage, uid: string) => {
     console.log(`Client connected: ${uid}`);
     
@@ -236,6 +322,27 @@ async function startServer() {
       
       Once you understand the user's roadblocks and expectations, generate a detailed study plan. To show this plan to the user, you MUST invoke the 'present_study_plan' tool. Tell the user to review the plan on their screen and save it if they like it.
       
+      If you identify the user's persona (Student, Parent, Adult Learner, Employer, or Counselor), you MUST trigger a UI redirect using the 'route_user_to_persona_page' tool with the corresponding route:
+      - Student -> /students
+      - Parent -> /parents
+      - Adult Learner -> /adult-learners
+      - Employer -> /employers
+      - Counselor -> /counselors
+
+      As the official TechIndiana advisor, you can also schedule meetings:
+      - For Employers: Use 'schedule_partnership_call' to book a talent pipeline call.
+      - For Parents/Students: Use 'schedule_advisor_call' to discuss apprenticeship pathways.
+      Inform the user once the booking is successful and show them the confirmation on their screen.
+
+      You can also deliver resources:
+      - Use 'send_counselor_toolkit' for counselors.
+      - Use 'send_parent_guide' for parents.
+
+      If a Parent asks how this program compares to college or expresses concern about their child falling behind, you MUST invoke the 'show_pathway_comparison' tool. Generate 3 to 4 comparison points (Cost, Duration, Experience, Outcomes). Tell the parent to look at their screen for the side-by-side breakdown.
+      
+      For Adult Learners, you can assess their skills:
+      - Use 'assess_adult_skills' to map their experience to an IT pathway.
+
       As the conversation progresses, periodically summarize the student's progress using the 'save_conversation_summary' tool. This is crucial for their end-of-session report.
       
       Keep your responses concise and conversational.`;
@@ -264,7 +371,20 @@ async function startServer() {
         config: {
           responseModalities: [Modality.AUDIO],
           systemInstruction,
-          tools: [{ functionDeclarations: [saveUserProfileTool, presentStudyPlanTool, saveConversationSummaryTool, routeUserToPersonaPageTool] }],
+            tools: [{ 
+              functionDeclarations: [
+                saveUserProfileTool, 
+                presentStudyPlanTool, 
+                saveConversationSummaryTool, 
+                routeUserToPersonaPageTool,
+                schedulePartnershipCallTool,
+                scheduleAdvisorCallTool,
+                sendCounselorToolkitTool,
+                sendParentGuideTool,
+                assessAdultSkillsTool,
+                showPathwayComparisonTool
+              ] 
+            }],
           outputAudioTranscription: {},
           inputAudioTranscription: {},
         },
@@ -414,6 +534,147 @@ async function startServer() {
                     functionResponses: [{
                       name: "route_user_to_persona_page",
                       response: { result: "Successfully routed user" },
+                      id: call.id
+                    }]
+                  });
+                } else if (call.name === "schedule_partnership_call") {
+                  console.log(`Tool call: schedule_partnership_call for ${uid}`, call.args);
+                  
+                  const eventLink = await createCalendarEvent(
+                    `Partnership Call: ${call.args.company_name} x TechIndiana`,
+                    `Partnership discussion with ${call.args.contact_name} from ${call.args.company_name}.`,
+                    call.args.preferred_date,
+                    call.args.preferred_time
+                  );
+
+                  // Forward to React client
+                  ws.send(JSON.stringify({ 
+                    type: 'meeting_scheduled', 
+                    event_link: eventLink 
+                  }));
+
+                  // Respond to Gemini
+                  geminiSession.sendToolResponse({
+                    functionResponses: [{
+                      name: "schedule_partnership_call",
+                      response: { result: `Meeting successfully booked for ${call.args.preferred_time}.` },
+                      id: call.id
+                    }]
+                  });
+                } else if (call.name === "schedule_advisor_call") {
+                  console.log(`Tool call: schedule_advisor_call for ${uid}`, call.args);
+                  
+                  const eventLink = await createCalendarEvent(
+                    `Advisor Call: ${call.args.attendee_name}`,
+                    `Topic: ${call.args.topic}`,
+                    call.args.preferred_date,
+                    call.args.preferred_time
+                  );
+
+                  // Forward to React client
+                  ws.send(JSON.stringify({ 
+                    type: 'meeting_scheduled', 
+                    event_link: eventLink 
+                  }));
+
+                  // Respond to Gemini
+                  geminiSession.sendToolResponse({
+                    functionResponses: [{
+                      name: "schedule_advisor_call",
+                      response: { result: `Meeting successfully booked for ${call.args.preferred_time}.` },
+                      id: call.id
+                    }]
+                  });
+                } else if (call.name === "send_counselor_toolkit" || call.name === "send_parent_guide") {
+                  console.log(`Tool call: ${call.name} for ${uid}`);
+                  
+                  const resourceType = call.name === "send_counselor_toolkit" ? "COUNSELOR_TOOLKIT" : "PARENT_GUIDE";
+                  let userEmail = "";
+
+                  if (isMongoConnected) {
+                    const userDoc = await UserProfile.findOne({ firebaseUid: uid });
+                    if (userDoc && userDoc.email) {
+                      userEmail = userDoc.email;
+                    }
+                  }
+
+                  // If email not in DB, we'd ideally ask, but for now we attempt with known email or log
+                  if (userEmail) {
+                    await sendResourceEmail(userEmail, resourceType);
+                    
+                    geminiSession.sendToolResponse({
+                      functionResponses: [{
+                        name: call.name,
+                        response: { result: `${call.name === "send_counselor_toolkit" ? "Counselor Toolkit" : "Parent Guide"} successfully emailed to ${userEmail}.` },
+                        id: call.id
+                      }]
+                    });
+                  } else {
+                    geminiSession.sendToolResponse({
+                      functionResponses: [{
+                        name: call.name,
+                        response: { result: "Failed to send email: User email not found in profile." },
+                        id: call.id
+                      }]
+                    });
+                  }
+                } else if (call.name === "assess_adult_skills") {
+                  console.log(`Tool call: assess_adult_skills for ${uid}`, call.args);
+                  
+                  const { current_role, past_experience } = call.args;
+                  let recommended_pathway = "General IT Support / Cloud Operations";
+                  let estimated_timeline = "18-24 months";
+
+                  const exp = (current_role + " " + past_experience).toLowerCase();
+
+                  if (exp.includes("logistics") || exp.includes("warehouse") || exp.includes("supply chain")) {
+                    recommended_pathway = "Supply Chain IT / Data Analytics";
+                    estimated_timeline = "12-18 months";
+                  } else if (exp.includes("retail") || exp.includes("service") || exp.includes("customer")) {
+                    recommended_pathway = "IT Help Desk / Customer Success Tech";
+                    estimated_timeline = "12 months";
+                  } else if (exp.includes("construction") || exp.includes("manufacturing") || exp.includes("factory")) {
+                    recommended_pathway = "Industrial IoT / Smart Manufacturing Tech";
+                    estimated_timeline = "15-18 months";
+                  }
+
+                  if (isMongoConnected) {
+                    await UserProfile.findOneAndUpdate(
+                      { firebaseUid: uid },
+                      { 
+                        assessed_pathway: recommended_pathway,
+                        assessed_timeline: estimated_timeline,
+                        skills_assessment_raw: { current_role, past_experience }
+                      },
+                      { upsert: true }
+                    );
+                  }
+
+                  geminiSession.sendToolResponse({
+                    functionResponses: [{
+                      name: "assess_adult_skills",
+                      response: { 
+                        recommended_pathway, 
+                        estimated_timeline,
+                        result: `Successfully mapped to ${recommended_pathway} with an estimated ${estimated_timeline} timeline.` 
+                      },
+                      id: call.id
+                    }]
+                  });
+                } else if (call.name === "show_pathway_comparison") {
+                  console.log(`Tool call: show_pathway_comparison for ${uid}`, call.args);
+                  
+                  // Forward to React client
+                  ws.send(JSON.stringify({ 
+                    type: 'render_comparison', 
+                    data: call.args.comparison_points 
+                  }));
+
+                  // Respond to Gemini
+                  geminiSession.sendToolResponse({
+                    functionResponses: [{
+                      name: "show_pathway_comparison",
+                      response: { result: "Comparison table successfully rendered on user screen." },
                       id: call.id
                     }]
                   });
