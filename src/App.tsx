@@ -386,23 +386,23 @@ function VoiceAgent() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] text-white font-sans selection:bg-orange-500/30">
+    <div className="min-h-screen bg-[var(--bg-primary)] text-[var(--text-primary)] font-sans selection:bg-ai-purple/30">
       {/* Header */}
-      <header className="border-b border-white/10 px-6 py-4 flex justify-between items-center backdrop-blur-md sticky top-0 z-50">
+      <header className="border-b border-[var(--border-color)] px-6 py-4 flex justify-between items-center backdrop-blur-md sticky top-0 z-50">
         <div className="flex items-center gap-2">
-          <div className="w-10 h-10 bg-orange-600 rounded-lg flex items-center justify-center shadow-lg shadow-orange-600/20">
+          <div className="w-10 h-10 bg-ai-purple rounded-lg flex items-center justify-center shadow-lg shadow-ai-purple/20">
             <BookOpen className="w-6 h-6 text-white" />
           </div>
           <div>
-            <h1 className="text-xl font-bold tracking-tight">TechIndiana</h1>
-            <p className="text-[10px] uppercase tracking-widest text-orange-500 font-semibold">Academic Advisor</p>
+            <h1 className="text-xl font-bold tracking-tight text-[var(--text-primary)]">TechIndiana</h1>
+            <p className="text-[10px] uppercase tracking-widest text-ai-purple font-black">Academic Advisor</p>
           </div>
         </div>
         
         <div className="flex items-center gap-4">
           <button 
             onClick={toggleTheme}
-            className="p-2 hover:bg-black/5 dark:hover:bg-white/5 rounded-full transition-colors"
+            className="p-2 hover:bg-[var(--bg-secondary)] rounded-full transition-colors"
             title="Toggle Theme"
           >
             {theme === 'light' ? <Moon className="w-5 h-5 text-slate-600" /> : <Sun className="w-5 h-5 text-yellow-400" />}
@@ -416,7 +416,7 @@ function VoiceAgent() {
               </div>
               <button 
                 onClick={handleLogout}
-                className="p-2 hover:bg-black/5 dark:hover:bg-white/5 rounded-full transition-colors group"
+                className="p-2 hover:bg-[var(--bg-secondary)] rounded-full transition-colors group"
                 title="Logout"
               >
                 <LogOut className="w-5 h-5 text-[var(--text-secondary)] group-hover:text-[var(--text-primary)]" />
