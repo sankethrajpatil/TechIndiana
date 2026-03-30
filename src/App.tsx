@@ -1,17 +1,11 @@
-
-import { useState, useRef, useCallback } from 'react';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
-// Persona landing page placeholders
-function StudentPage() { return <div className="p-12 text-center text-2xl">Welcome, Student!</div>; }
-function ParentPage() { return <div className="p-12 text-center text-2xl">Welcome, Parent!</div>; }
-function AdultLearnerPage() { return <div className="p-12 text-center text-2xl">Welcome, Adult Learner!</div>; }
-function EmployerPage() { return <div className="p-12 text-center text-2xl">Welcome, Employer!</div>; }
-function CounselorPage() { return <div className="p-12 text-center text-2xl">Welcome, Counselor!</div>; }
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { GoogleGenAI, Modality, Type, FunctionDeclaration } from "@google/genai";
-import { Mic, MicOff, LogIn, LogOut, BookOpen, Sparkles, Loader2, CheckCircle2 } from 'lucide-react';
+import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User } from 'firebase/auth';
+import { doc, setDoc, getDoc } from 'firebase/firestore';
+import { auth, db } from './firebase';
+import { Mic, MicOff, LogIn, LogOut, BookOpen, Sparkles, Loader2, CheckCircle2, Users, GraduationCap, Briefcase, UserCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import ProgramsPage from './components/ProgramsPage';
-import PersonaPage from './components/PersonaPage';
+import { BrowserRouter, Routes, Route, useNavigate, Link } from 'react-router-dom';
 
 // --- Audio Helpers ---
 const SAMPLE_RATE = 16000;
@@ -52,30 +46,61 @@ const saveUserDetailsDeclaration: FunctionDeclaration = {
   }
 };
 
-export default function App() {
-  const [user, setUser] = useState(null);
-  const [loginForm, setLoginForm] = useState({ username: '', password: '' });
-  const [registerForm, setRegisterForm] = useState({ username: '', password: '' });
-  const [isRegistering, setIsRegistering] = useState(false);
+// --- Persona Landing Pages ---
+const StudentPage = () => (
+  <div className="min-h-screen bg-[#0a0a0a] text-white p-12 flex flex-col items-center justify-center text-center space-y-6">
+    <GraduationCap className="w-20 h-20 text-orange-600" />
+    <h2 className="text-5xl font-black tracking-tighter">STUDENT PORTAL</h2>
+    <p className="text-white/60 max-w-xl">Welcome to your personalized learning dashboard. Explore courses, track your progress, and connect with mentors.</p>
+    <Link to="/" className="text-orange-500 hover:underline">Back to Advisor</Link>
+  </div>
+);
+
+const ParentPage = () => (
+  <div className="min-h-screen bg-[#0a0a0a] text-white p-12 flex flex-col items-center justify-center text-center space-y-6">
+    <Users className="w-20 h-20 text-orange-600" />
+    <h2 className="text-5xl font-black tracking-tighter">PARENT RESOURCES</h2>
+    <p className="text-white/60 max-w-xl">Support your child's technical journey. Access progress reports, financial aid info, and career guidance.</p>
+    <Link to="/" className="text-orange-500 hover:underline">Back to Advisor</Link>
+  </div>
+);
+
+const AdultLearnerPage = () => (
+  <div className="min-h-screen bg-[#0a0a0a] text-white p-12 flex flex-col items-center justify-center text-center space-y-6">
+    <UserCircle className="w-20 h-20 text-orange-600" />
+    <h2 className="text-5xl font-black tracking-tighter">ADULT LEARNER HUB</h2>
+    <p className="text-white/60 max-w-xl">Reskill and upskill for the modern workforce. Flexible learning paths designed for busy professionals.</p>
+    <Link to="/" className="text-orange-500 hover:underline">Back to Advisor</Link>
+  </div>
+);
+
+const EmployerPage = () => (
+  <div className="min-h-screen bg-[#0a0a0a] text-white p-12 flex flex-col items-center justify-center text-center space-y-6">
+    <Briefcase className="w-20 h-20 text-orange-600" />
+    <h2 className="text-5xl font-black tracking-tighter">EMPLOYER PARTNERS</h2>
+    <p className="text-white/60 max-w-xl">Connect with Indiana's top technical talent. Post jobs, sponsor projects, and build your future workforce.</p>
+    <Link to="/" className="text-orange-500 hover:underline">Back to Advisor</Link>
+  </div>
+);
+
+const CounselorPage = () => (
+  <div className="min-h-screen bg-[#0a0a0a] text-white p-12 flex flex-col items-center justify-center text-center space-y-6">
+    <BookOpen className="w-20 h-20 text-orange-600" />
+    <h2 className="text-5xl font-black tracking-tighter">COUNSELOR TOOLKIT</h2>
+    <p className="text-white/60 max-w-xl">Tools to help you guide students toward successful tech careers. Access curriculum maps and industry data.</p>
+    <Link to="/" className="text-orange-500 hover:underline">Back to Advisor</Link>
+  </div>
+);
+
+function VoiceAgent() {
+  const navigate = useNavigate();
+  const [user, setUser] = useState<User | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [transcript, setTranscript] = useState<string[]>([]);
   const [studyPlan, setStudyPlan] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [loginLoading, setLoginLoading] = useState(false);
-  const [loginError, setLoginError] = useState<string | null>(null);
-
-  // --- Data integration states (connect frontend to new API endpoints)
-  const [personas, setPersonas] = useState<any[]>([]);
-  const [programs, setPrograms] = useState<any[]>([]);
-  const [loadingPersonas, setLoadingPersonas] = useState(false);
-  const [loadingPrograms, setLoadingPrograms] = useState(false);
-  const [dataError, setDataError] = useState<string | null>(null);
-  const [selectedPersona, setSelectedPersona] = useState<string | null>(null);
-  const [personaBundle, setPersonaBundle] = useState<any | null>(null);
-  const [loadingBundle, setLoadingBundle] = useState(false);
-  
 
   const audioContextRef = useRef<AudioContext | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -84,53 +109,108 @@ export default function App() {
   const audioQueueRef = useRef<AudioBuffer[]>([]);
   const isPlayingRef = useRef(false);
 
+  const [studyPlanPreview, setStudyPlanPreview] = useState<{ plan_title: string, action_items: string[] } | null>(null);
+  const [isSavingPlan, setIsSavingPlan] = useState(false);
+  const [isEndingSession, setIsEndingSession] = useState(false);
 
-  // --- Username/Password Auth ---
-  const handleLogin = async () => {
-    setLoginLoading(true);
-    setLoginError(null);
+  // --- Firebase Auth ---
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (u) => {
+      setUser(u);
+      if (u) {
+        // Fetch existing profile to see if there's a study plan
+        try {
+          const docRef = doc(db, "users", u.uid);
+          const docSnap = await getDoc(docRef);
+          if (docSnap.exists()) {
+            const data = docSnap.data();
+            if (data.study_plan) {
+              setStudyPlan(data.study_plan);
+            }
+          }
+        } catch (err) {
+          console.error("Error fetching profile:", err);
+        }
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const handleSavePlan = async () => {
+    if (!user || !studyPlanPreview) return;
+    setIsSavingPlan(true);
     try {
-      const res = await fetch('/api/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(loginForm)
+      const token = await user.getIdToken();
+      const response = await fetch('/api/profile/plan', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ study_plan: studyPlanPreview })
       });
-      const data = await res.json();
-      if (data.success) {
-        setUser({ username: loginForm.username });
+      if (response.ok) {
+        setStudyPlan(JSON.stringify(studyPlanPreview));
+        setStudyPlanPreview(null);
+        alert("Study plan saved successfully!");
       } else {
-        setLoginError(data.error || 'Login failed');
+        setError("Failed to save study plan.");
       }
     } catch (err) {
-      setLoginError('Login failed');
+      console.error(err);
+      setError("Failed to save study plan.");
+    } finally {
+      setIsSavingPlan(false);
     }
-    setLoginLoading(false);
   };
 
-  const handleRegister = async () => {
-    setLoginLoading(true);
-    setLoginError(null);
+  const handleLogin = async () => {
     try {
-      const res = await fetch('/api/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(registerForm)
-      });
-      const data = await res.json();
-      if (data.success) {
-        setUser({ username: registerForm.username });
-      } else {
-        setLoginError(data.error || 'Registration failed');
-      }
+      const provider = new GoogleAuthProvider();
+      await signInWithPopup(auth, provider);
     } catch (err) {
-      setLoginError('Registration failed');
+      setError("Login failed. Please try again.");
+      console.error(err);
     }
-    setLoginLoading(false);
   };
 
   const handleLogout = async () => {
-    setUser(null);
+    await auth.signOut();
     await stopConversation();
+  };
+
+  const handleEndSession = async () => {
+    if (!user) return;
+    setIsEndingSession(true);
+    setError(null);
+
+    try {
+      // 1. Stop the conversation (closes WebSocket and Mic)
+      await stopConversation();
+
+      // 2. Call the backend to send the email
+      const token = await user.getIdToken();
+      const response = await fetch('/api/session/end', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (response.ok) {
+        alert("Session ended. Your study plan and conversation summary have been emailed to you!");
+        // Optionally redirect or refresh the dashboard
+        window.location.reload(); 
+      } else {
+        const data = await response.json();
+        setError(data.error || "Failed to send session summary email.");
+      }
+    } catch (err) {
+      console.error(err);
+      setError("An error occurred while ending the session.");
+    } finally {
+      setIsEndingSession(false);
+    }
   };
 
   // --- Audio Playback ---
@@ -166,113 +246,60 @@ export default function App() {
     playNextInQueue();
   }, [playNextInQueue]);
 
-  // --- Live API Connection ---
+  // --- Live API Connection (Updated for Backend WebSocket) ---
   const startConversation = async () => {
     if (!user) return;
     setIsConnecting(true);
     setError(null);
 
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const token = await user.getIdToken();
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//${window.location.host}/api/voice-agent?token=${token}`;
       
-      const session = await ai.live.connect({
-        model: "gemini-3.1-flash-live-preview",
-        config: {
-          responseModalities: [Modality.AUDIO],
-          speechConfig: {
-            voiceConfig: { prebuiltVoiceConfig: { voiceName: "Zephyr" } }
-          },
-          systemInstruction: `You are the official voice-based academic advisor for TechIndiana. Your tone is upbeat, technical, encouraging, and welcoming.
-          
-          Follow these phases in order:
-          Phase 1: Onboarding. Warmly greet the user to TechIndiana and ask for their Name, Grade or Level, and Area of Interest. Wait for them to answer. Once they provide this, call the 'save_user_details' function.
-          Phase 2: Discovery. After saving details, ask about their specific concerns, technical roadblocks, and expectations from the TechIndiana study program. Listen and ask short follow-up questions.
-          Phase 3: Action & Study Plan. Synthesize their roadblocks and expectations into a personalized study plan. Present it step-by-step. Ask if it sounds good or needs adjustments.
-          
-          Guardrails:
-          - Steer non-tech/non-academic topics back to TechIndiana goals.
-          - Speak naturally and conversationally. Keep responses concise.
-          - If the user interrupts, stop speaking and listen.`,
-          tools: [{ functionDeclarations: [saveUserDetailsDeclaration] }],
-          outputAudioTranscription: {},
-          inputAudioTranscription: {},
-        },
-        callbacks: {
-          onopen: () => {
-            setIsConnected(true);
-            setIsConnecting(false);
-            startMic();
-          },
-          onmessage: async (msg) => {
-            if (msg.serverContent?.modelTurn?.parts) {
-              for (const part of msg.serverContent.modelTurn.parts) {
-                if (part.inlineData) {
-                  queueAudio(part.inlineData.data);
-                }
-                if (part.text) {
-                  setTranscript(prev => [...prev, `Advisor: ${part.text}`]);
-                  // Check if this looks like a study plan
-                  if (part.text.toLowerCase().includes("study plan") || part.text.toLowerCase().includes("step 1")) {
-                    setStudyPlan(part.text);
-                  }
-                }
-              }
-            }
+      const ws = new WebSocket(wsUrl);
+      
+      ws.onopen = () => {
+        setIsConnected(true);
+        setIsConnecting(false);
+        startMic();
+      };
 
-            if (msg.serverContent?.interrupted) {
-              audioQueueRef.current = [];
-              isPlayingRef.current = false;
-            }
-
-            if (msg.toolCall) {
-              for (const call of msg.toolCall.functionCalls) {
-                if (call.name === "save_user_details") {
-                  try {
-                    const response = await fetch(`/api/users/${user.uid}`, {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify(call.args)
-                    });
-                    const result = await response.json();
-                    if (result.success) {
-                      sessionRef.current?.sendToolResponse({
-                        functionResponses: [{
-                          name: "save_user_details",
-                          response: { success: true },
-                          id: call.id
-                        }]
-                      });
-                      setTranscript(prev => [...prev, "System: Details saved successfully!"]);
-                    } else {
-                      throw new Error(result.error || 'Unknown error');
-                    }
-                  } catch (err) {
-                    console.error("Error saving details:", err);
-                    sessionRef.current?.sendToolResponse({
-                      functionResponses: [{
-                        name: "save_user_details",
-                        response: { success: false, error: "Database error" },
-                        id: call.id
-                      }]
-                    });
-                  }
-                }
-              }
-            }
-          },
-          onclose: async () => {
-            setIsConnected(false);
-            await stopMic();
-          },
-          onerror: async (err) => {
-            console.error("Live API Error:", err);
-            setError("Connection error. Please try again.");
-            await stopConversation();
-          }
+      ws.onmessage = (event) => {
+        const msg = JSON.parse(event.data);
+        if (msg.type === 'audio') {
+          queueAudio(msg.data);
+        } else if (msg.type === 'status') {
+          setTranscript(prev => [...prev, `System: ${msg.message}`]);
+        } else if (msg.type === 'error') {
+          setError(msg.message);
+        } else if (msg.type === 'study_plan_preview') {
+          setStudyPlanPreview(msg.plan);
+        } else if (msg.type === 'ui_redirect') {
+          console.log(`Navigating to: ${msg.route}`);
+          navigate(msg.route);
         }
-      });
+      };
 
-      sessionRef.current = session;
+      ws.onclose = () => {
+        setIsConnected(false);
+        stopMic();
+      };
+
+      ws.onerror = () => {
+        setError("WebSocket connection failed.");
+      };
+
+      // Override sessionRef to use our WebSocket
+      sessionRef.current = {
+        sendRealtimeInput: (input: any) => {
+          if (input.audio) {
+            ws.send(JSON.stringify({ type: 'audio', data: input.audio.data }));
+          }
+        },
+        close: () => ws.close()
+      };
+
     } catch (err) {
       console.error(err);
       setIsConnecting(false);
@@ -340,15 +367,7 @@ export default function App() {
   }, []);
 
   return (
-    <Router>
-    <Routes>
-      <Route path="/students" element={<StudentPage />} />
-      <Route path="/parents" element={<ParentPage />} />
-      <Route path="/adult-learners" element={<AdultLearnerPage />} />
-      <Route path="/employers" element={<EmployerPage />} />
-      <Route path="/counselors" element={<CounselorPage />} />
-      <Route path="/*" element={
-        <div className="min-h-screen bg-[#0a0a0a] text-white font-sans selection:bg-orange-500/30">
+    <div className="min-h-screen bg-[#0a0a0a] text-white font-sans selection:bg-orange-500/30">
       {/* Header */}
       <header className="border-b border-white/10 px-6 py-4 flex justify-between items-center backdrop-blur-md sticky top-0 z-50">
         <div className="flex items-center gap-2">
@@ -364,7 +383,8 @@ export default function App() {
         {user ? (
           <div className="flex items-center gap-4">
             <div className="hidden sm:flex flex-col items-end">
-              <span className="text-sm font-medium">{user.username}</span>
+              <span className="text-sm font-medium">{user.displayName}</span>
+              <span className="text-[10px] text-white/40">Student ID: {user.uid.slice(0, 8)}</span>
             </div>
             <button 
               onClick={handleLogout}
@@ -375,81 +395,45 @@ export default function App() {
             </button>
           </div>
         ) : (
-          <div className="flex flex-col gap-2 w-64">
-            {isRegistering ? (
-              <>
-                <input
-                  className="px-3 py-2 rounded bg-white/10 text-white"
-                  placeholder="Username"
-                  value={registerForm.username}
-                  onChange={e => setRegisterForm(f => ({ ...f, username: e.target.value }))}
-                />
-                <input
-                  className="px-3 py-2 rounded bg-white/10 text-white"
-                  placeholder="Password"
-                  type="password"
-                  value={registerForm.password}
-                  onChange={e => setRegisterForm(f => ({ ...f, password: e.target.value }))}
-                />
-                <button
-                  onClick={handleRegister}
-                  className="bg-white text-black px-4 py-2 rounded-full font-semibold hover:bg-orange-500 hover:text-white transition-all active:scale-95"
-                  disabled={loginLoading}
-                >
-                  {loginLoading ? 'Registering...' : 'Register'}
-                </button>
-                <button
-                  onClick={() => setIsRegistering(false)}
-                  className="text-xs text-orange-400 hover:underline"
-                >
-                  Already have an account? Login
-                </button>
-              </>
-            ) : (
-              <>
-                <input
-                  className="px-3 py-2 rounded bg-white/10 text-white"
-                  placeholder="Username"
-                  value={loginForm.username}
-                  onChange={e => setLoginForm(f => ({ ...f, username: e.target.value }))}
-                />
-                <input
-                  className="px-3 py-2 rounded bg-white/10 text-white"
-                  placeholder="Password"
-                  type="password"
-                  value={loginForm.password}
-                  onChange={e => setLoginForm(f => ({ ...f, password: e.target.value }))}
-                />
-                <button
-                  onClick={handleLogin}
-                  className="bg-white text-black px-4 py-2 rounded-full font-semibold hover:bg-orange-500 hover:text-white transition-all active:scale-95"
-                  disabled={loginLoading}
-                >
-                  {loginLoading ? 'Logging in...' : 'Login'}
-                </button>
-                <button
-                  onClick={() => setIsRegistering(true)}
-                  className="text-xs text-orange-400 hover:underline"
-                >
-                  New user? Register
-                </button>
-              </>
-            )}
-            {loginError && <div className="text-red-400 text-xs mt-1">{loginError}</div>}
-          </div>
+          <button 
+            onClick={handleLogin}
+            className="flex items-center gap-2 bg-white text-black px-4 py-2 rounded-full font-semibold hover:bg-orange-500 hover:text-white transition-all active:scale-95"
+          >
+            <LogIn className="w-4 h-4" />
+            Login with Google
+          </button>
         )}
       </header>
 
-      {/* Data panel removed — kept background fetching for personas/programs to surface after AI suggests a study plan */}
-
       <main className="max-w-4xl mx-auto px-6 py-12">
         {!user ? (
-          <div className="flex flex-col items-center justify-center min-h-[400px]">
-            <h2 className="text-2xl font-bold mb-4">Welcome to TechIndiana</h2>
-            <p className="text-white/60 mb-2">Login or register to start your session with the AI advisor.</p>
+          <div className="text-center space-y-8 py-20">
+            <motion.div 
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="space-y-4"
+            >
+              <h2 className="text-5xl sm:text-7xl font-black tracking-tighter leading-none">
+                YOUR FUTURE <br />
+                <span className="text-orange-600">IN TECH</span> STARTS HERE.
+              </h2>
+              <p className="text-white/60 text-lg max-w-xl mx-auto">
+                Connect with our AI Academic Advisor for a personalized study plan tailored to your technical goals at TechIndiana.
+              </p>
+            </motion.div>
+            
+            <motion.button
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.4 }}
+              onClick={handleLogin}
+              className="bg-orange-600 hover:bg-orange-500 text-white px-8 py-4 rounded-2xl font-bold text-xl shadow-2xl shadow-orange-600/20 transition-all active:scale-95 flex items-center gap-3 mx-auto"
+            >
+              Get Started
+              <Sparkles className="w-6 h-6" />
+            </motion.button>
           </div>
         ) : (
-          <>
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
             {/* Advisor Interaction Area */}
             <div className="lg:col-span-7 space-y-6">
@@ -526,13 +510,28 @@ export default function App() {
                         <p className="text-xl font-medium px-4">Your advisor is listening...</p>
                       </div>
 
-                      <button
-                        onClick={stopConversation}
-                        className="bg-red-500/10 text-red-500 border border-red-500/20 px-6 py-2 rounded-full font-bold hover:bg-red-500 hover:text-white transition-all flex items-center gap-2 mx-auto"
-                      >
-                        <MicOff className="w-4 h-4" />
-                        End Session
-                      </button>
+                      <div className="flex flex-col sm:flex-row gap-4">
+                        <button
+                          onClick={stopConversation}
+                          className="bg-white/10 text-white border border-white/20 px-6 py-2 rounded-full font-bold hover:bg-white/20 transition-all flex items-center gap-2 mx-auto"
+                        >
+                          <MicOff className="w-4 h-4" />
+                          Pause Session
+                        </button>
+
+                        <button
+                          onClick={handleEndSession}
+                          disabled={isEndingSession}
+                          className="bg-orange-600 text-white px-8 py-2 rounded-full font-bold hover:bg-orange-500 transition-all flex items-center gap-2 mx-auto disabled:opacity-50"
+                        >
+                          {isEndingSession ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <CheckCircle2 className="w-4 h-4" />
+                          )}
+                          End & Email Summary
+                        </button>
+                      </div>
                     </motion.div>
                   )}
                 </AnimatePresence>
@@ -563,22 +562,89 @@ export default function App() {
 
             {/* Study Plan / Info Area */}
             <div className="lg:col-span-5 space-y-6">
+              <AnimatePresence>
+                {studyPlanPreview && (
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.9 }}
+                    className="bg-white text-black rounded-3xl p-8 space-y-6 shadow-2xl"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="bg-orange-600 p-2 rounded-xl">
+                          <Sparkles className="w-6 h-6 text-white" />
+                        </div>
+                        <h3 className="text-xl font-bold">New Plan Preview</h3>
+                      </div>
+                      <button 
+                        onClick={() => setStudyPlanPreview(null)}
+                        className="text-black/40 hover:text-black"
+                      >
+                        Dismiss
+                      </button>
+                    </div>
+
+                    <div className="space-y-4">
+                      <h4 className="text-2xl font-black tracking-tight">{studyPlanPreview.plan_title}</h4>
+                      <ul className="space-y-2">
+                        {studyPlanPreview.action_items.map((item, i) => (
+                          <li key={i} className="flex gap-2 text-sm">
+                            <span className="text-orange-600 font-bold">•</span>
+                            {item}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+
+                    <button
+                      onClick={handleSavePlan}
+                      disabled={isSavingPlan}
+                      className="w-full bg-orange-600 text-white py-3 rounded-2xl font-bold hover:bg-orange-500 transition-all flex items-center justify-center gap-2"
+                    >
+                      {isSavingPlan ? <Loader2 className="w-5 h-5 animate-spin" /> : <CheckCircle2 className="w-5 h-5" />}
+                      Save This Plan
+                    </button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
               <div className="bg-orange-600 rounded-3xl p-8 space-y-6 shadow-2xl shadow-orange-600/20">
                 <div className="flex items-center gap-3">
                   <div className="bg-white/20 p-2 rounded-xl">
-                    <Sparkles className="w-6 h-6 text-white" />
+                    <BookOpen className="w-6 h-6 text-white" />
                   </div>
-                  <h3 className="text-2xl font-bold">Study Plan</h3>
+                  <h3 className="text-2xl font-bold">Your Study Plan</h3>
                 </div>
 
                 {studyPlan ? (
                   <div className="space-y-4">
                     <div className="bg-black/20 rounded-2xl p-6 text-sm leading-relaxed whitespace-pre-wrap">
-                      {studyPlan}
+                      {typeof studyPlan === 'string' && studyPlan.startsWith('{') ? (
+                        (() => {
+                          try {
+                            const parsed = JSON.parse(studyPlan);
+                            return (
+                              <div className="space-y-4">
+                                <h4 className="text-lg font-bold">{parsed.plan_title}</h4>
+                                <ul className="space-y-2">
+                                  {parsed.action_items.map((item: string, i: number) => (
+                                    <li key={i} className="flex gap-2">• {item}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            );
+                          } catch (e) {
+                            return studyPlan;
+                          }
+                        })()
+                      ) : (
+                        studyPlan
+                      )}
                     </div>
                     <div className="flex items-center gap-2 text-white/80 text-xs font-medium">
                       <CheckCircle2 className="w-4 h-4" />
-                      Generated by TechIndiana Advisor
+                      Active Plan
                     </div>
                   </div>
                 ) : (
@@ -609,17 +675,6 @@ export default function App() {
               </div>
             </div>
           </div>
-
-          {/* Once the AI generates a studyPlan, surface program suggestions and persona bundle below the study plan */}
-          {studyPlan && (
-            <div className="mt-8">
-              <ProgramsPage programs={programs} />
-              <div className="mt-6">
-                <PersonaPage personaBundle={personaBundle} />
-              </div>
-            </div>
-          )}
-          </>
         )}
       </main>
 
@@ -638,9 +693,21 @@ export default function App() {
           background: rgba(255, 255, 255, 0.2);
         }
       `}</style>
-        </div>
-      } />
-    </Routes>
-    </Router>
+    </div>
+  );
+}
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<VoiceAgent />} />
+        <Route path="/students" element={<StudentPage />} />
+        <Route path="/parents" element={<ParentPage />} />
+        <Route path="/adult-learners" element={<AdultLearnerPage />} />
+        <Route path="/employers" element={<EmployerPage />} />
+        <Route path="/counselors" element={<CounselorPage />} />
+      </Routes>
+    </BrowserRouter>
   );
 }

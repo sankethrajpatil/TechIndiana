@@ -2,36 +2,19 @@
 <img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
 </div>
 
-# TechIndiana: AI-Driven Apprenticeship Platform
+# Run and deploy your AI Studio app
 
-TechIndiana is a voice-first, AI-powered platform for career navigation, apprenticeship planning, and resource delivery. It uses Google Gemini 3.1 Live API, Google Calendar, MongoDB, and React.
+This contains everything you need to run your app locally.
 
-## Features
-- **Voice Agent**: Conversational AI for onboarding, study plans, and navigation
-- **AI-Driven UI Routing**: Dynamic persona-based page redirects
-- **Calendar Scheduling**: Book meetings for employers, parents, and students
-- **Resource Delivery**: Email toolkits and guides to counselors and parents
-- **Skills Self-Assessment**: Maps adult learners to IT pathways
+View your app in AI Studio: https://ai.studio/apps/368c1d06-0a36-4191-b5dd-2a9c2bd2ab3f
 
-## Quick Start
+## Run Locally
 
-**Prerequisites:** Node.js, MongoDB, Google Cloud Service Account (for Calendar), Gmail account (for email)
+**Prerequisites:**  Node.js
+
 
 1. Install dependencies:
    `npm install`
-2. Set up environment variables:
-   - `GEMINI_API_KEY` (Gemini 3.1 Live)
-   - `GOOGLE_APPLICATION_CREDENTIALS` (path to your Google service account JSON)
-   - `GOOGLE_CALENDAR_ID` (target Google Calendar ID)
-   - `EMAIL_USER` and `EMAIL_PASS` (Gmail for Nodemailer)
+2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
 3. Run the app:
    `npm run dev`
-
-## Architecture
-See [ARCHITECTURE.md](ARCHITECTURE.md) for a full system and schema overview.
-
-## Contributing
-Open issues or PRs for improvements, new features, or bug fixes.
-
-## License
-MIT
