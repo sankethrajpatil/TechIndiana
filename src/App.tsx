@@ -268,7 +268,19 @@ function VoiceAgent() {
     setError(null);
 
     try {
-      const token = await user.getIdToken();
+      // Use a development fallback token when running in Vite dev mode and Firebase Admin
+      // is not configured on the server. The server accepts tokens of the form "dev:<uid>"
+      // only when NODE_ENV !== 'production'. This avoids requiring Firebase credentials
+      // for local testing.
+      let token: string;
+      // Vite exposes import.meta.env.DEV
+      const isDev = typeof import.meta !== 'undefined' && (import.meta as any).env && (import.meta as any).env.DEV;
+      if (isDev) {
+        token = `dev:${user.uid}`;
+      } else {
+        token = await user.getIdToken();
+      }
+
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const wsUrl = `${protocol}//${window.location.host}/api/voice-agent?token=${token}`;
       
