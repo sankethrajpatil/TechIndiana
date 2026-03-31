@@ -347,10 +347,12 @@ function VoiceAgent() {
 
   const startMic = async () => {
     try {
-      if (audioContextRef.current) {
-        await stopMic();
+      if (!audioContextRef.current) {
+        audioContextRef.current = new AudioContext({ sampleRate: SAMPLE_RATE });
+      } else if (audioContextRef.current.state === 'suspended') {
+        await audioContextRef.current.resume();
       }
-      audioContextRef.current = new AudioContext({ sampleRate: SAMPLE_RATE });
+
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
 
