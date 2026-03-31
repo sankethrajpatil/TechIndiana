@@ -399,10 +399,10 @@ async function startServer() {
       }
 
       geminiSession = await ai.live.connect({
-        model: 'gemini-live-2.5-flash-native-audio',
+        model: 'gemini-2.0-flash-exp',
         config: {
-          responseModalities: [Modality.AUDIO],
-          systemInstruction,
+          responseModalities: ['audio'],
+          systemInstruction: { parts: [{ text: systemInstruction }] },
             tools: [{ 
               functionDeclarations: [
                 saveUserProfileTool, 
