@@ -398,10 +398,14 @@ async function startServer() {
         }
       }
 
+      console.log(`Initializing Gemini with API Key start: ${process.env.GEMINI_API_KEY?.substring(0, 8)}...`);
+      
       geminiSession = await ai.live.connect({
         model: 'models/gemini-2.0-flash-exp',
         config: {
-          responseModalities: ['audio'],
+          generationConfig: {
+            responseModalities: ['audio']
+          },
           systemInstruction: { parts: [{ text: systemInstruction }] },
           tools: [{ 
             functionDeclarations: [
@@ -417,9 +421,22 @@ async function startServer() {
               showPathwayComparisonTool
             ] 
           }],
+        }
+      });
+
+      // Handle raw messages from the SDK if callbacks are failing
+      if (typeof (geminiSession as any).on === 'function') {
+        (geminiSession as any).on('message', (msg: any) => console.log('Raw Gemini Msg:', JSON.stringify(msg).substring(0, 100)));
+        (geminiSession as any).on('close', () => console.log('Gemini Event: closed'));
+        (geminiSession as any).on('error', (err: any) => console.error('Gemini Event: error', err));
+      }
+
+      // Keep original callbacks just in case
+      (geminiSession as any).callbacks = {
+        onopen: () => {
+          console.log('Gemini session opened successfully.');
         },
-        callbacks: {
-          onmessage: async (msg: any) => {
+        onmessage: async (msg: any) => {
             // Handle Transcriptions and save to history
             if (msg.serverContent?.modelTurn?.parts) {
               const textPart = msg.serverContent.modelTurn.parts.find((p: any) => p.text);
