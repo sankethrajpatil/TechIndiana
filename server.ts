@@ -6,6 +6,9 @@ import admin from 'firebase-admin';
 import { GoogleGenAI, Modality, Type, FunctionDeclaration } from '@google/genai';
 import path from 'path';
 import fs from 'fs';
+
+console.log('DEBUG: Node.js version:', process.version);
+console.log('DEBUG: Initializing GoogleGenAI...');
 import { createServer as createViteServer } from 'vite';
 import UserProfile from './src/models/UserProfile';
 import { firebaseAuthMiddleware, verifyWebSocketToken } from './src/middleware/auth';
@@ -400,29 +403,34 @@ async function startServer() {
 
       console.log(`Initializing Gemini with API Key start: ${process.env.GEMINI_API_KEY?.substring(0, 8)}...`);
       
-      geminiSession = await ai.live.connect({
-        model: 'models/gemini-2.0-flash-exp',
-        config: {
-          generationConfig: {
-            responseModalities: ['audio']
-          },
-          systemInstruction: { parts: [{ text: systemInstruction }] },
-          tools: [{ 
-            functionDeclarations: [
-              saveUserProfileTool, 
-              presentStudyPlanTool, 
-              saveConversationSummaryTool, 
-              routeUserToPersonaPageTool,
-              schedulePartnershipCallTool,
-              scheduleAdvisorCallTool,
-              sendCounselorToolkitTool,
-              sendParentGuideTool,
-              assessAdultSkillsTool,
-              showPathwayComparisonTool
-            ] 
-          }],
-        }
-      });
+      try {
+        geminiSession = await ai.live.connect({
+          model: 'models/gemini-2.0-flash-exp',
+          config: {
+            responseModalities: ['audio'],
+            systemInstruction: { parts: [{ text: systemInstruction }] },
+            tools: [{ 
+              functionDeclarations: [
+                saveUserProfileTool, 
+                presentStudyPlanTool, 
+                saveConversationSummaryTool, 
+                routeUserToPersonaPageTool,
+                schedulePartnershipCallTool,
+                scheduleAdvisorCallTool,
+                sendCounselorToolkitTool,
+                sendParentGuideTool,
+                assessAdultSkillsTool,
+                showPathwayComparisonTool
+              ] 
+            }],
+          }
+        });
+      } catch (err: any) {
+        console.error('CRITICAL: Gemini connection failed during connect():', err);
+        ws.send(JSON.stringify({ type: 'error', message: 'Gemini service failed to start.' }));
+        ws.close();
+        return;
+      }
 
       // Handle raw messages from the SDK if callbacks are failing
       if (typeof (geminiSession as any).on === 'function') {
