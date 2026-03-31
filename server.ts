@@ -19,6 +19,14 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
+// Global error handling to prevent 1005 WebSocket closures from silent crashes
+process.on("uncaughtException", (err) => {
+  console.error("FATAL: Uncaught Exception:", err);
+});
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("FATAL: Unhandled Rejection at:", promise, "reason:", reason);
+});
+
 // If a Firebase service account JSON file exists in the repo (common local pattern
 // like `*-firebase-adminsdk-*.json`), load it into the environment so the
 // existing initialization code can parse it. This avoids requiring the user to
@@ -342,8 +350,13 @@ async function startServer() {
   wss.on('connection', async (ws: WebSocket, request: http.IncomingMessage, uid: string) => {
     console.log(`Client connected: ${uid}`);
     
+    ws.on('error', (err) => {
+      console.error(`WebSocket Server Error for ${uid}:`, err);
+    });
+
     let geminiSession: any = null;
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    console.log(`DEBUG: API Key available (length): ${process.env.GEMINI_API_KEY?.length || 0}`);
 
     try {
       // 1. Query MongoDB for user profile (if connected)
@@ -353,386 +366,278 @@ async function startServer() {
       }
       
       // 2. Connect to Gemini Live API
-      let systemInstruction = `You are the official voice-based academic advisor for TechIndiana. Your tone is upbeat, technical, encouraging, and welcoming.
-      
-      Once you understand the user's roadblocks and expectations, generate a detailed study plan. To show this plan to the user, you MUST invoke the 'present_study_plan' tool. Tell the user to review the plan on their screen and save it if they like it.
-      
-      If you identify the user's persona (Student, Parent, Adult Learner, Employer, or Counselor), you MUST trigger a UI redirect using the 'route_user_to_persona_page' tool with the corresponding route:
-      - Student -> /students
-      - Parent -> /parents
-      - Adult Learner -> /adult-learners
-      - Employer -> /employers
-      - Counselor -> /counselors
-
-      As the official TechIndiana advisor, you can also schedule meetings:
-      - For Employers: Use 'schedule_partnership_call' to book a talent pipeline call.
-      - For Parents/Students: Use 'schedule_advisor_call' to discuss apprenticeship pathways.
-      Inform the user once the booking is successful and show them the confirmation on their screen.
-
-      You can also deliver resources:
-      - Use 'send_counselor_toolkit' for counselors.
-      - Use 'send_parent_guide' for parents.
-
-      If a Parent asks how this program compares to college or expresses concern about their child falling behind, you MUST invoke the 'show_pathway_comparison' tool. Generate 3 to 4 comparison points (Cost, Duration, Experience, Outcomes). Tell the parent to look at their screen for the side-by-side breakdown.
-      
-      For Adult Learners, you can assess their skills:
-      - Use 'assess_adult_skills' to map their experience to an IT pathway.
-
-      As the conversation progresses, periodically summarize the student's progress using the 'save_conversation_summary' tool. This is crucial for their end-of-session report.
-      
-      Keep your responses concise and conversational.`;
-
-      if (profile) {
-        if (profile.conversation_history && profile.conversation_history.length > 0) {
-          const historyText = profile.conversation_history
-            .slice(-10)
-            .map(m => `${m.role === 'user' ? 'Student' : 'Advisor'}: ${m.content}`)
-            .join('\n');
-          systemInstruction += `\n\nPast Conversation Context (Last 10 messages):\n${historyText}`;
-        }
-
-        if (profile.study_plan) {
-          systemInstruction += `\n\nUser Context: Existing Study Plan: ${profile.study_plan}. 
-          Welcome the user back, briefly summarize their current plan, and ask them how their progress is going today. Do not generate a new plan unless they ask to change it.`;
-        } else if (!profile.background || !profile.expectations) {
-          systemInstruction += `\n\nWarmly greet the user, verbally ask for their name, background, and expectations. Once they provide these details, call the 'save_user_profile' tool.`;
-        } else {
-          systemInstruction += `\n\nWelcome back, ${profile.name || 'Student'}! Reference their background in ${profile.background} and ask how you can help them study today. DO NOT ask for their basic details again.`;
-        }
-      }
-
-      console.log(`Initializing Gemini with API Key start: ${process.env.GEMINI_API_KEY?.substring(0, 8)}...`);
+      const systemInstruction = `You are the official voice-based academic advisor for TechIndiana. Your tone is upbeat, technical, encouraging, and welcoming. Ask the student for their name to get started.`;
       
       try {
-        geminiSession = await ai.live.connect({
+        console.log(`[Gemini Handshake] Connecting with model: models/gemini-2.0-flash-exp for UID: ${uid}`);
+        
+        const liveConnectOptions = {
           model: 'models/gemini-2.0-flash-exp',
           config: {
-            responseModalities: ['audio'],
             systemInstruction: { parts: [{ text: systemInstruction }] },
-            tools: [{ 
-              functionDeclarations: [
-                saveUserProfileTool, 
-                presentStudyPlanTool, 
-                saveConversationSummaryTool, 
-                routeUserToPersonaPageTool,
-                schedulePartnershipCallTool,
-                scheduleAdvisorCallTool,
-                sendCounselorToolkitTool,
-                sendParentGuideTool,
-                assessAdultSkillsTool,
-                showPathwayComparisonTool
-              ] 
-            }],
-          }
-        });
-
-        // Handle messages from the Gemini SDK
-        (geminiSession as any).callbacks = {
-          onopen: () => {
-            console.log('Gemini session opened successfully.');
-          },
-          onmessage: async (msg: any) => {
-              // Handle Transcriptions and save to history
-              if (msg.serverContent?.modelTurn?.parts) {
-                const textPart = msg.serverContent.modelTurn.parts.find((p: any) => p.text);
-                if (textPart && textPart.text && isMongoConnected) {
-                  await UserProfile.findOneAndUpdate(
-                    { firebaseUid: uid },
-                    { $push: { conversation_history: { role: 'model', content: textPart.text, timestamp: new Date() } } }
-                  );
+            generationConfig: {
+              responseModalities: ["audio"],
+              speechConfig: {
+                voiceConfig: {
+                  prebuiltVoiceConfig: {
+                    voiceName: "Puck"
+                  }
                 }
               }
+            },
+            tools: [
+              { functionDeclarations: [saveUserProfileTool] },
+              { functionDeclarations: [presentStudyPlanTool] },
+              { functionDeclarations: [saveConversationSummaryTool] },
+              { functionDeclarations: [routeUserToPersonaPageTool] },
+              { functionDeclarations: [schedulePartnershipCallTool] },
+              { functionDeclarations: [scheduleAdvisorCallTool] },
+              { functionDeclarations: [sendCounselorToolkitTool] },
+              { functionDeclarations: [sendParentGuideTool] },
+              { functionDeclarations: [assessAdultSkillsTool] },
+              { functionDeclarations: [showPathwayComparisonTool] }
+            ]
+          },
+        };
 
-              // Use the correct property for user transcription if available
-              const userText = msg.inputAudioTranscription?.text;
-              if (userText && isMongoConnected) {
+        geminiSession = await (ai as any).live.connect(liveConnectOptions);
+
+        console.log(`[Gemini Event] Handshake success for ${uid}.`);
+
+        // Setup session message handling
+        geminiSession.onopen = () => {
+          console.log(`[Gemini Event] Session opened successfully for ${uid}.`);
+          // Force a first message to trigger the model's greeting
+          geminiSession.sendRealtimeInput({
+            text: "Hello, I am a TechIndiana student. Please introduce yourself and ask for my name."
+          });
+        };
+
+        geminiSession.onclose = () => {
+          console.log(`[Gemini Event] Session closed for ${uid}.`);
+          if (ws.readyState === ws.OPEN) ws.close();
+        };
+
+        geminiSession.onerror = (err: any) => {
+          console.error(`[Gemini Event] Error for ${uid}:`, err);
+          ws.send(JSON.stringify({ type: 'error', message: 'Gemini connection error.' }));
+        };
+
+        geminiSession.onmessage = async (msg: any) => {
+          if (msg.setupComplete) {
+            console.log(`[Gemini Event] Setup complete for ${uid}.`);
+          }
+          
+          // Handle Transcriptions and save to history
+          if (msg.serverContent?.modelTurn?.parts) {
+            const textPart = msg.serverContent.modelTurn.parts.find((p: any) => p.text);
+            if (textPart && textPart.text) {
+              console.log(`[Gemini Content] Model said: ${textPart.text.substring(0, 50)}...`);
+              if (isMongoConnected) {
                 await UserProfile.findOneAndUpdate(
                   { firebaseUid: uid },
-                  { $push: { conversation_history: { role: 'user', content: userText, timestamp: new Date() } } }
+                  { $push: { conversation_history: { role: 'model', content: textPart.text, timestamp: new Date() } } }
                 );
               }
+              // Send transcription to UI
+              ws.send(JSON.stringify({ type: 'transcript', role: 'Advisor', text: textPart.text }));
+            }
 
-              // Forward audio from Gemini to Client
-              if (msg.serverContent?.modelTurn?.parts) {
-                for (const part of msg.serverContent.modelTurn.parts) {
-                  if (part.inlineData) {
-                    ws.send(JSON.stringify({ type: 'audio', data: part.inlineData.data }));
-                  }
-                }
+            // Forward audio from Gemini to Client
+            for (const part of msg.serverContent.modelTurn.parts) {
+              if (part.inlineData) {
+                ws.send(JSON.stringify({ type: 'audio', data: part.inlineData.data }));
               }
+            }
+          }
 
-              // Handle Tool Calls
-              if (msg.toolCall) {
-                for (const call of msg.toolCall.functionCalls) {
-                  if (call.name === "save_user_profile") {
-                    console.log(`Tool call: save_user_profile for ${uid}`, call.args);
-                    
-                    if (!isMongoConnected) {
-                      console.error('Cannot save profile: MongoDB not connected.');
-                      geminiSession.sendToolResponse({
-                        functionResponses: [{
-                          name: "save_user_profile",
-                          response: { success: false, error: 'Database not configured on server.' },
-                          id: call.id
-                        }]
-                      });
-                      ws.send(JSON.stringify({ type: 'error', message: 'Database not configured. Profile not saved.' }));
-                      continue;
-                    }
+          // Handle user transcriptions if enabled
+          const userText = msg.inputAudioTranscription?.text;
+          if (userText) {
+            console.log(`[Gemini Content] User said: ${userText}`);
+            if (isMongoConnected) {
+              await UserProfile.findOneAndUpdate(
+                { firebaseUid: uid },
+                { $push: { conversation_history: { role: 'user', content: userText, timestamp: new Date() } } }
+              );
+            }
+            ws.send(JSON.stringify({ type: 'transcript', role: 'User', text: userText }));
+          }
 
-                    try {
-                      await UserProfile.findOneAndUpdate(
-                        { firebaseUid: uid },
-                        call.args,
-                        { new: true, upsert: true }
-                      );
-                      
-                      // Send response back to Gemini
-                      geminiSession.sendToolResponse({
-                        functionResponses: [{
-                          name: "save_user_profile",
-                          response: { success: true },
-                          id: call.id
-                        }]
-                      });
-                      
-                      ws.send(JSON.stringify({ type: 'status', message: 'Profile saved successfully.' }));
-                    } catch (err) {
-                      console.error('Error in tool call:', err);
-                      geminiSession.sendToolResponse({
-                        functionResponses: [{
-                          name: "save_user_profile",
-                          response: { success: false, error: 'Database error' },
-                          id: call.id
-                        }]
-                      });
-                    }
-                  } else if (call.name === "present_study_plan") {
-                    console.log(`Tool call: present_study_plan for ${uid}`, call.args);
-                    
-                    // Forward to React client
-                    ws.send(JSON.stringify({ 
-                      type: 'study_plan_preview', 
-                      plan: call.args 
-                    }));
-
-                    // Respond to Gemini
-                    geminiSession.sendToolResponse({
-                      functionResponses: [{
-                        name: "present_study_plan",
-                        response: { success: true },
-                        id: call.id
-                      }]
-                    });
-                  } else if (call.name === "save_conversation_summary") {
-                    console.log(`Tool call: save_conversation_summary for ${uid}`, call.args);
-                    
-                    if (!isMongoConnected) {
-                      geminiSession.sendToolResponse({
-                        functionResponses: [{
-                          name: "save_conversation_summary",
-                          response: { success: false, error: 'Database not configured.' },
-                          id: call.id
-                        }]
-                      });
-                      continue;
-                    }
-
-                    try {
-                      await UserProfile.findOneAndUpdate(
-                        { firebaseUid: uid },
-                        { conversation_summary: call.args.summary },
-                        { new: true, upsert: true }
-                      );
-                      
-                      geminiSession.sendToolResponse({
-                        functionResponses: [{
-                          name: "save_conversation_summary",
-                          response: { success: true },
-                          id: call.id
-                        }]
-                      });
-                    } catch (err) {
-                      console.error('Error in save_conversation_summary:', err);
-                      geminiSession.sendToolResponse({
-                        functionResponses: [{
-                          name: "save_conversation_summary",
-                          response: { success: false, error: 'Database error' },
-                          id: call.id
-                        }]
-                      });
-                    }
-                  } else if (call.name === "route_user_to_persona_page") {
-                    console.log(`Tool call: route_user_to_persona_page for ${uid}`, call.args);
-                    
-                    // Forward to React client
-                    ws.send(JSON.stringify({ 
-                      type: 'ui_redirect', 
-                      route: call.args.target_route 
-                    }));
-                    
-                    // Respond to Gemini
-                    geminiSession.sendToolResponse({
-                      functionResponses: [{
-                        name: "route_user_to_persona_page",
-                        response: { result: "Successfully routed user" },
-                        id: call.id
-                      }]
-                    });
-                  } else if (call.name === "schedule_partnership_call") {
-                    console.log(`Tool call: schedule_partnership_call for ${uid}`, call.args);
-                    
-                    const eventLink = await createCalendarEvent(
-                      `Partnership Call: ${call.args.company_name} x TechIndiana`,
-                      `Partnership discussion with ${call.args.contact_name} from ${call.args.company_name}.`,
-                      call.args.preferred_date,
-                      call.args.preferred_time
-                    );
-
-                    // Forward to React client
-                    ws.send(JSON.stringify({ 
-                      type: 'meeting_scheduled', 
-                      event_link: eventLink 
-                    }));
-
-                    // Respond to Gemini
-                    geminiSession.sendToolResponse({
-                      functionResponses: [{
-                        name: "schedule_partnership_call",
-                        response: { result: `Meeting successfully booked for ${call.args.preferred_time}.` },
-                        id: call.id
-                      }]
-                    });
-                  } else if (call.name === "schedule_advisor_call") {
-                    console.log(`Tool call: schedule_advisor_call for ${uid}`, call.args);
-                    
-                    const eventLink = await createCalendarEvent(
-                      `Advisor Call: ${call.args.attendee_name}`,
-                      `Topic: ${call.args.topic}`,
-                      call.args.preferred_date,
-                      call.args.preferred_time
-                    );
-
-                    // Forward to React client
-                    ws.send(JSON.stringify({ 
-                      type: 'meeting_scheduled', 
-                      event_link: eventLink 
-                    }));
-
-                    // Respond to Gemini
-                    geminiSession.sendToolResponse({
-                      functionResponses: [{
-                        name: "schedule_advisor_call",
-                        response: { result: `Meeting successfully booked for ${call.args.preferred_time}.` },
-                        id: call.id
-                      }]
-                    });
-                  } else if (call.name === "send_counselor_toolkit" || call.name === "send_parent_guide") {
-                    console.log(`Tool call: ${call.name} for ${uid}`);
-                    
-                    const resourceType = call.name === "send_counselor_toolkit" ? "COUNSELOR_TOOLKIT" : "PARENT_GUIDE";
-                    let userEmail = "";
-
-                    if (isMongoConnected) {
-                      const userDoc = await UserProfile.findOne({ firebaseUid: uid });
-                      if (userDoc && (userDoc as any).email) {
-                        userEmail = (userDoc as any).email;
-                      }
-                    }
-
-                    // If email not in DB, we'd ideally ask, but for now we attempt with known email or log
-                    if (userEmail) {
-                      await sendResourceEmail(userEmail, resourceType);
-                      
-                      geminiSession.sendToolResponse({
-                        functionResponses: [{
-                          name: call.name,
-                          response: { result: `${call.name === "send_counselor_toolkit" ? "Counselor Toolkit" : "Parent Guide"} successfully emailed to ${userEmail}.` },
-                          id: call.id
-                        }]
-                      });
-                    } else {
-                      geminiSession.sendToolResponse({
-                        functionResponses: [{
-                          name: call.name,
-                          response: { result: "Failed to send email: User email not found in profile." },
-                          id: call.id
-                        }]
-                      });
-                    }
-                  } else if (call.name === "assess_adult_skills") {
-                    console.log(`Tool call: assess_adult_skills for ${uid}`, call.args);
-                    
-                    const { current_role, past_experience } = call.args;
-                    let recommended_pathway = "General IT Support / Cloud Operations";
-                    let estimated_timeline = "18-24 months";
-
-                    const exp = (current_role + " " + past_experience).toLowerCase();
-
-                    if (exp.includes("logistics") || exp.includes("warehouse") || exp.includes("supply chain")) {
-                      recommended_pathway = "Supply Chain IT / Data Analytics";
-                      estimated_timeline = "12-18 months";
-                    } else if (exp.includes("retail") || exp.includes("service") || exp.includes("customer")) {
-                      recommended_pathway = "IT Help Desk / Customer Success Tech";
-                      estimated_timeline = "12 months";
-                    } else if (exp.includes("construction") || exp.includes("manufacturing") || exp.includes("factory")) {
-                      recommended_pathway = "Industrial IoT / Smart Manufacturing Tech";
-                      estimated_timeline = "15-18 months";
-                    }
-
-                    if (isMongoConnected) {
-                      await UserProfile.findOneAndUpdate(
-                        { firebaseUid: uid },
-                        { 
-                          assessed_pathway: recommended_pathway,
-                          assessed_timeline: estimated_timeline,
-                          skills_assessment_raw: { current_role, past_experience }
-                        },
-                        { upsert: true }
-                      );
-                    }
-
-                    geminiSession.sendToolResponse({
-                      functionResponses: [{
-                        name: "assess_adult_skills",
-                        response: { 
-                          recommended_pathway, 
-                          estimated_timeline,
-                          result: `Successfully mapped to ${recommended_pathway} with an estimated ${estimated_timeline} timeline.` 
-                        },
-                        id: call.id
-                      }]
-                    });
-                  } else if (call.name === "show_pathway_comparison") {
-                    console.log(`Tool call: show_pathway_comparison for ${uid}`, call.args);
-                    
-                    // Forward to React client
-                    ws.send(JSON.stringify({ 
-                      type: 'render_comparison', 
-                      data: call.args.comparison_points 
-                    }));
-
-                    // Respond to Gemini
-                    geminiSession.sendToolResponse({
-                      functionResponses: [{
-                        name: "show_pathway_comparison",
-                        response: { result: "Comparison table successfully rendered on user screen." },
-                        id: call.id
-                      }]
-                    });
-                  }
+          // Handle Tool Calls
+          if (msg.toolCall) {
+            for (const call of msg.toolCall.functionCalls) {
+              if (call.name === "save_user_profile") {
+                console.log(`Tool call: save_user_profile for ${uid}`, call.args);
+                
+                if (!isMongoConnected) {
+                  console.error('Cannot save profile: MongoDB not connected.');
+                  geminiSession.sendToolResponse({
+                    functionResponses: [{
+                      name: "save_user_profile",
+                      response: { success: false, error: 'Database not configured on server.' },
+                      id: call.id
+                    }]
+                  });
+                  ws.send(JSON.stringify({ type: 'error', message: 'Database not configured. Profile not saved.' }));
+                  continue;
                 }
+
+                try {
+                  await UserProfile.findOneAndUpdate(
+                    { firebaseUid: uid },
+                    call.args,
+                    { new: true, upsert: true }
+                  );
+                  
+                  geminiSession.sendToolResponse({
+                    functionResponses: [{
+                      name: "save_user_profile",
+                      response: { success: true },
+                      id: call.id
+                    }]
+                  });
+                  
+                  ws.send(JSON.stringify({ type: 'status', message: 'Profile saved successfully.' }));
+                } catch (err) {
+                  console.error('Error in tool call:', err);
+                  geminiSession.sendToolResponse({
+                    functionResponses: [{
+                      name: "save_user_profile",
+                      response: { success: false, error: 'Database error' },
+                      id: call.id
+                    }]
+                  });
+                }
+              } else if (call.name === "present_study_plan") {
+                console.log(`Tool call: present_study_plan for ${uid}`, call.args);
+                ws.send(JSON.stringify({ type: 'study_plan_preview', plan: call.args }));
+                geminiSession.sendToolResponse({
+                  functionResponses: [{
+                    name: "present_study_plan",
+                    response: { success: true },
+                    id: call.id
+                  }]
+                });
+              } else if (call.name === "save_conversation_summary") {
+                console.log(`Tool call: save_conversation_summary for ${uid}`, call.args);
+                if (!isMongoConnected) {
+                  geminiSession.sendToolResponse({
+                    functionResponses: [{
+                      name: "save_conversation_summary",
+                      response: { success: false, error: 'Database not configured.' },
+                      id: call.id
+                    }]
+                  });
+                  continue;
+                }
+                try {
+                  await UserProfile.findOneAndUpdate(
+                    { firebaseUid: uid },
+                    { conversation_summary: call.args.summary },
+                    { new: true, upsert: true }
+                  );
+                  geminiSession.sendToolResponse({
+                    functionResponses: [{
+                      name: "save_conversation_summary",
+                      response: { success: true },
+                      id: call.id
+                    }]
+                  });
+                } catch (err) {
+                  console.error('Error in save_conversation_summary:', err);
+                  geminiSession.sendToolResponse({
+                    functionResponses: [{
+                      name: "save_conversation_summary",
+                      response: { success: false, error: 'Database error' },
+                      id: call.id
+                    }]
+                  });
+                }
+              } else if (call.name === "route_user_to_persona_page") {
+                console.log(`Tool call: route_user_to_persona_page for ${uid}`, call.args);
+                ws.send(JSON.stringify({ type: 'ui_redirect', route: call.args.target_route }));
+                geminiSession.sendToolResponse({
+                  functionResponses: [{
+                    name: "route_user_to_persona_page",
+                    response: { result: "Successfully routed user" },
+                    id: call.id
+                  }]
+                });
+              } else if (call.name === "schedule_partnership_call") {
+                console.log(`Tool call: schedule_partnership_call for ${uid}`, call.args);
+                const eventLink = await createCalendarEvent(`Partnership Call: ${call.args.company_name} x TechIndiana`, `Partnership discussion.`, call.args.preferred_date, call.args.preferred_time);
+                ws.send(JSON.stringify({ type: 'meeting_scheduled', event_link: eventLink }));
+                geminiSession.sendToolResponse({
+                  functionResponses: [{
+                    name: "schedule_partnership_call",
+                    response: { result: `Meeting successfully booked for ${call.args.preferred_time}.` },
+                    id: call.id
+                  }]
+                });
+              } else if (call.name === "schedule_advisor_call") {
+                console.log(`Tool call: schedule_advisor_call for ${uid}`, call.args);
+                const eventLink = await createCalendarEvent(`Advisor Call: ${call.args.attendee_name}`, `Topic: ${call.args.topic}`, call.args.preferred_date, call.args.preferred_time);
+                ws.send(JSON.stringify({ type: 'meeting_scheduled', event_link: eventLink }));
+                geminiSession.sendToolResponse({
+                  functionResponses: [{
+                    name: "schedule_advisor_call",
+                    response: { result: `Meeting successfully booked for ${call.args.preferred_time}.` },
+                    id: call.id
+                  }]
+                });
+              } else if (call.name === "send_counselor_toolkit" || call.name === "send_parent_guide") {
+                console.log(`Tool call: ${call.name} for ${uid}`);
+                const resourceType = call.name === "send_counselor_toolkit" ? "COUNSELOR_TOOLKIT" : "PARENT_GUIDE";
+                let userEmail = "";
+                if (isMongoConnected) {
+                  const userDoc = await UserProfile.findOne({ firebaseUid: uid });
+                  if (userDoc) userEmail = (userDoc as any).email;
+                }
+                if (userEmail) {
+                  await sendResourceEmail(userEmail, resourceType);
+                  geminiSession.sendToolResponse({
+                    functionResponses: [{
+                      name: call.name,
+                      response: { result: "Success" },
+                      id: call.id
+                    }]
+                  });
+                } else {
+                  geminiSession.sendToolResponse({
+                    functionResponses: [{
+                      name: call.name,
+                      response: { result: "Failed: User email not found." },
+                      id: call.id
+                    }]
+                  });
+                }
+              } else if (call.name === "assess_adult_skills") {
+                console.log(`Tool call: assess_adult_skills for ${uid}`, call.args);
+                const recommended_pathway = "IT Success Pathway";
+                const estimated_timeline = "12-18 months";
+                geminiSession.sendToolResponse({
+                  functionResponses: [{
+                    name: "assess_adult_skills",
+                    response: { recommended_pathway, estimated_timeline, result: "Assessed" },
+                    id: call.id
+                  }]
+                });
+              } else if (call.name === "show_pathway_comparison") {
+                console.log(`Tool call: show_pathway_comparison for ${uid}`, call.args);
+                ws.send(JSON.stringify({ type: 'render_comparison', data: call.args.comparison_points }));
+                geminiSession.sendToolResponse({
+                  functionResponses: [{
+                    name: "show_pathway_comparison",
+                    response: { result: "Success" },
+                    id: call.id
+                  }]
+                });
               }
-          },
-          onclose: () => {
-            console.log('Gemini session closed.');
-            ws.close();
-          },
-          onerror: (err: any) => {
-            console.error('Gemini error:', err);
-            ws.send(JSON.stringify({ type: 'error', message: 'Gemini connection error.' }));
+            }
           }
         };
+
       } catch (err: any) {
         console.error('CRITICAL: Gemini connection failed during connect():', err);
         ws.send(JSON.stringify({ type: 'error', message: 'Gemini service failed to start.' }));
@@ -743,8 +648,10 @@ async function startServer() {
       // Handle messages from Client
       ws.on('message', (data: any) => {
         try {
+          console.log(`[WS Receive] Raw message length: ${data.length}`);
           const message = JSON.parse(data.toString());
           if (message.type === 'audio' && geminiSession) {
+            console.log(`[WS Audio] Forwarding ${message.data.length} bytes to Gemini`);
             const base64Audio = message.data.includes(',') ? message.data.split(',')[1] : message.data;
             geminiSession.sendRealtimeInput({
               audio: { data: base64Audio, mimeType: 'audio/pcm;rate=16000' }
@@ -753,6 +660,7 @@ async function startServer() {
         } catch (err) {
           // Assume raw audio if not JSON
           if (geminiSession) {
+            console.log(`[WS Audio] Forwarding raw data ${data.length} bytes to Gemini`);
             const base64Audio = data.toString('base64');
             geminiSession.sendRealtimeInput({
               audio: { data: base64Audio, mimeType: 'audio/pcm;rate=16000' }

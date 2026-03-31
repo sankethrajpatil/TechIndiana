@@ -294,10 +294,14 @@ function VoiceAgent() {
 
       ws.onmessage = (event) => {
         const msg = JSON.parse(event.data);
+        console.log("Client WS message received:", msg.type, msg.role, msg.text?.substring(0, 30));
+        
         if (msg.type === 'audio') {
           queueAudio(msg.data);
+        } else if (msg.type === 'transcript') {
+          setTranscript(prev => [...prev.slice(-49), `${msg.role}: ${msg.text}`]);
         } else if (msg.type === 'status') {
-          setTranscript(prev => [...prev, `System: ${msg.message}`]);
+          setTranscript(prev => [...prev.slice(-49), `System: ${msg.message}`]);
         } else if (msg.type === 'error') {
           setError(msg.message);
         } else if (msg.type === 'study_plan_preview') {
@@ -315,10 +319,15 @@ function VoiceAgent() {
       ws.onclose = (event) => {
         setIsConnected(false);
         // Only trigger stopMic if it's an unexpected close or intentional.
-        // But avoid race conditions with startMic.
         console.log("WebSocket closed", event.code, event.reason);
         if (event.code !== 1000) {
-          stopMic();
+          // Check if we should stop the mic based on intent
+          // If we weren't just connecting, it's an error/disconnect
+          if (setIsConnecting) setIsConnecting(false);
+          // DON'T CALL stopMic() here immediately as it destroys the AudioContext
+          // which startMic() might still be initializing.
+          // Instead, just update the connection state.
+          setIsRecording(false);
         }
       };
 
@@ -329,11 +338,24 @@ function VoiceAgent() {
       // Override sessionRef to use our WebSocket
       sessionRef.current = {
         sendRealtimeInput: (input: any) => {
-          if (input.audio) {
-            ws.send(JSON.stringify({ type: 'audio', data: input.audio.data }));
+          if (ws.readyState === WebSocket.OPEN) {
+            if (input.audio) {
+              // console.log("[WS] Sending audio data to server...");
+              ws.send(JSON.stringify({ type: 'audio', data: input.audio.data }));
+            }
+          } else {
+            // Silently drop audio if WS is not open to avoid spamming the console
+            // with "WebSocket is already in CLOSING or CLOSED state."
+            if (ws.readyState !== WebSocket.CONNECTING) {
+               // console.debug("Dropping audio: WebSocket state:", ws.readyState);
+            }
           }
         },
-        close: () => ws.close()
+        close: () => {
+          if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+            ws.close();
+          }
+        }
       };
 
     } catch (err) {
@@ -352,41 +374,67 @@ function VoiceAgent() {
 
   const startMic = async () => {
     try {
-      console.log("startMic triggered. Current state:", audioContextRef.current?.state);
+      console.log("startMic triggered. Current context:", audioContextRef.current);
+      console.log("Current state:", audioContextRef.current?.state);
 
       if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
-        audioContextRef.current = new AudioContext({ sampleRate: SAMPLE_RATE });
+        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: SAMPLE_RATE });
+        console.log("Created new AudioContext:", audioContextRef.current);
       }
 
-      if (audioContextRef.current.state === 'suspended') {
-        await audioContextRef.current.resume();
-      }
-
+      const currentContext = audioContextRef.current;
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
 
-      // Critical Check: Did something call stopMic while getUserMedia was waiting?
-      if (!audioContextRef.current) {
-        console.error("AudioContext became null during getUserMedia initialization");
+      if (currentContext.state === 'suspended') {
+        await currentContext.resume();
+      }
+
+      // Critical Check: Did something call stopMic or close the context while getUserMedia was waiting?
+      if (!currentContext || currentContext.state === 'closed') {
+        console.warn("AudioContext was closed or became null during getUserMedia initialization");
         return;
       }
 
-      const source = audioContextRef.current.createMediaStreamSource(stream);
-      const processor = audioContextRef.current.createScriptProcessor(4096, 1, 1);
+      const source = currentContext.createMediaStreamSource(stream);
+      const processor = currentContext.createScriptProcessor(4096, 1, 1);
       processorRef.current = processor;
 
       processor.onaudioprocess = (e) => {
+        // If the context is closed or closing, stop processing
+        if (currentContext.state === 'closed') {
+          return;
+        }
+
         const inputData = e.inputBuffer.getChannelData(0);
+        
+        // --- DEBUG: VOLUME CHECK ---
+        let maxVal = 0;
+        for (let i = 0; i < inputData.length; i++) {
+          if (Math.abs(inputData[i]) > maxVal) maxVal = Math.abs(inputData[i]);
+        }
+        if (maxVal > 0.01) {
+          console.log(`[Mic Active] Max volume in this chunk: ${maxVal.toFixed(4)}`);
+        }
+        // ---------------------------
+
         const pcmBuffer = floatTo16BitPCM(inputData);
         const base64Data = btoa(String.fromCharCode(...new Uint8Array(pcmBuffer)));
         
-        sessionRef.current?.sendRealtimeInput({
-          audio: { data: base64Data, mimeType: `audio/pcm;rate=${SAMPLE_RATE}` }
-        });
+        if (base64Data.length > 0 && sessionRef.current) {
+          // Send audio if both session and mic are active
+          if (Math.random() < 0.05) { // Just log every ~1 second to check flow
+            // Note: ws was changed to ws2 in some contexts, ensure we use sessionRef or the correct local variable
+            console.log(`[Flow Check] Sending ${base64Data.length} chars.`);
+          }
+          sessionRef.current.sendRealtimeInput({
+            audio: { data: base64Data, mimeType: `audio/pcm;rate=${SAMPLE_RATE}` }
+          });
+        }
       };
 
       source.connect(processor);
-      processor.connect(audioContextRef.current.destination);
+      processor.connect(currentContext.destination);
       setIsRecording(true);
     } catch (err) {
       console.error("Mic error:", err);
