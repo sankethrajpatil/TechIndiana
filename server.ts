@@ -5,6 +5,7 @@ import mongoose from 'mongoose';
 import admin from 'firebase-admin';
 import { GoogleGenAI, Modality, Type, FunctionDeclaration } from '@google/genai';
 import path from 'path';
+import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import UserProfile from './src/models/UserProfile';
 import { firebaseAuthMiddleware, verifyWebSocketToken } from './src/middleware/auth';
@@ -14,6 +15,24 @@ import { sendResourceEmail } from './server/services/emailService';
 import dotenv from 'dotenv';
 
 dotenv.config();
+
+// If a Firebase service account JSON file exists in the repo (common local pattern
+// like `*-firebase-adminsdk-*.json`), load it into the environment so the
+// existing initialization code can parse it. This avoids requiring the user to
+// paste the JSON into `.env` while keeping the file out of source control.
+if (!process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
+  try {
+    const files = fs.readdirSync(process.cwd());
+    const candidate = files.find(f => f.toLowerCase().includes('firebase-adminsdk') && f.toLowerCase().endsWith('.json'));
+    if (candidate) {
+      const content = fs.readFileSync(path.join(process.cwd(), candidate), 'utf8');
+      process.env.FIREBASE_SERVICE_ACCOUNT_JSON = content;
+      console.log(`Loaded Firebase service account from file: ${candidate}`);
+    }
+  } catch (e) {
+    // Ignore - we'll fall back to the .env variable if provided
+  }
+}
 
 // --- Firebase Admin Initialization ---
 if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
@@ -730,13 +749,28 @@ async function startServer() {
     const url = new URL(request.url!, `http://${request.headers.host}`);
     if (url.pathname === '/api/voice-agent') {
       const token = url.searchParams.get('token');
+      console.log('WebSocket upgrade request token:', token ? `${token.substring(0, 60)}${token.length > 60 ? '...' : ''}` : '<<none>>');
+
       if (!token) {
         socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
         socket.destroy();
         return;
       }
 
-      const uid = await verifyWebSocketToken(token);
+      // Development shortcut: accept dev:<uid> tokens locally without calling Firebase
+      let uid: string | null = null;
+      try {
+        if (process.env.NODE_ENV !== 'production' && token.startsWith('dev:')) {
+          uid = token.split('dev:')[1] || null;
+          console.log('Using dev token for WebSocket upgrade. UID:', uid ? uid.substring(0, 12) : 'null');
+        } else {
+          uid = await verifyWebSocketToken(token);
+        }
+      } catch (err) {
+        console.error('Error while verifying WebSocket token during upgrade:', err);
+        uid = null;
+      }
+
       if (!uid) {
         socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
         socket.destroy();
