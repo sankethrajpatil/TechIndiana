@@ -401,26 +401,22 @@ async function startServer() {
       geminiSession = await ai.live.connect({
         model: 'models/gemini-2.0-flash-exp',
         config: {
-          generationConfig: {
-            responseModalities: ['audio'],
-          },
+          responseModalities: [Modality.AUDIO],
           systemInstruction: { parts: [{ text: systemInstruction }] },
-            tools: [{ 
-              functionDeclarations: [
-                saveUserProfileTool, 
-                presentStudyPlanTool, 
-                saveConversationSummaryTool, 
-                routeUserToPersonaPageTool,
-                schedulePartnershipCallTool,
-                scheduleAdvisorCallTool,
-                sendCounselorToolkitTool,
-                sendParentGuideTool,
-                assessAdultSkillsTool,
-                showPathwayComparisonTool
-              ] 
-            }],
-          outputAudioTranscription: {},
-          inputAudioTranscription: {},
+          tools: [{ 
+            functionDeclarations: [
+              saveUserProfileTool, 
+              presentStudyPlanTool, 
+              saveConversationSummaryTool, 
+              routeUserToPersonaPageTool,
+              schedulePartnershipCallTool,
+              scheduleAdvisorCallTool,
+              sendCounselorToolkitTool,
+              sendParentGuideTool,
+              assessAdultSkillsTool,
+              showPathwayComparisonTool
+            ] 
+          }],
         },
         callbacks: {
           onmessage: async (msg: any) => {
