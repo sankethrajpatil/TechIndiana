@@ -172,7 +172,7 @@ async function startServer() {
   const app = express();
   const server = http.createServer(app);
   const wss = new WebSocketServer({ noServer: true });
-  const PORT = process.env.PORT || 8080;
+  const PORT = parseInt(process.env.PORT || '8080', 10);
 
   // Set COOP header for all responses to allow window.close/closed for Google Auth/Firebase
   app.use((req, res, next) => {
@@ -375,15 +375,27 @@ async function startServer() {
   };
 
   wss.on('connection', async (ws: WebSocket, request: http.IncomingMessage, uid: string) => {
-    console.log(`Client connected: ${uid}`);
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`[Phase3 CONNECT] ✅ Client WebSocket connected. UID: ${uid}`);
+    console.log(`[Phase3 CONNECT] Headers: origin=${request.headers.origin}, host=${request.headers.host}`);
+    console.log(`${'='.repeat(60)}\n`);
+
+    let clientAudioChunks = 0;
+    let geminiAudioChunks = 0;
     
     ws.on('error', (err) => {
-      console.error(`WebSocket Server Error for ${uid}:`, err);
+      console.error(`[Phase3 ERROR] ❌ WebSocket Server Error for ${uid}:`, err);
+    });
+
+    ws.on('close', (code, reason) => {
+      console.log(`[Phase3 DISCONNECT] ⚠️  Client disconnected. UID: ${uid} | Code: ${code} | Reason: ${reason?.toString() || 'none'}`);
     });
 
     let geminiSession: any = null;
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-    console.log(`DEBUG: API Key available (length): ${process.env.GEMINI_API_KEY?.length || 0}`);
+    console.log(`[Phase3 Init] GEMINI_API_KEY present: ${!!process.env.GEMINI_API_KEY} | Length: ${process.env.GEMINI_API_KEY?.length || 0}`);
+    console.log(`[Phase3 Init] FIREBASE_ADMIN initialized: ${admin.apps.length > 0}`);
+    console.log(`[Phase3 Init] MongoDB connected: ${isMongoConnected}`);
 
     try {
       // 1. Query MongoDB for user profile (if connected)
@@ -427,52 +439,56 @@ async function startServer() {
           },
         };
 
+        console.log(`[Phase3 Gemini] ⏳ Calling ai.live.connect() for UID: ${uid}...`);
         geminiSession = await (ai as any).live.connect(liveConnectOptions);
-
-        console.log(`[Gemini Event] Handshake success for ${uid}.`);
+        console.log(`[Phase3 Gemini] ✅ ai.live.connect() returned a session object for ${uid}. Type: ${typeof geminiSession}`);
 
         // Setup session message handling
         geminiSession.onopen = () => {
-          console.log(`[Gemini Event] Session opened successfully for ${uid}.`);
-          // Force a first message to trigger the model's greeting
+          console.log(`[Phase3 Gemini] ✅ Gemini session OPEN (BidiGenerateContentSetup sent) for ${uid}.`);
+          console.log(`[Phase3 Gemini] Sending initial greeting prompt to trigger first audio response...`);
           geminiSession.sendRealtimeInput({
             text: "Hello, I am a TechIndiana student. Please introduce yourself and ask for my name."
           });
+          console.log(`[Phase3 Gemini] Initial greeting text sent.`);
         };
 
         geminiSession.onclose = () => {
-          console.log(`[Gemini Event] Session closed for ${uid}.`);
+          console.log(`[Phase3 Gemini] ⚠️  Gemini session CLOSED for ${uid}. Closing client WS.`);
           if (ws.readyState === ws.OPEN) ws.close();
         };
 
         geminiSession.onerror = (err: any) => {
-          console.error(`[Gemini Event] Error for ${uid}:`, err);
+          console.error(`[Phase3 Gemini] ❌ Gemini session ERROR for ${uid}:`, err);
           ws.send(JSON.stringify({ type: 'error', message: 'Gemini connection error.' }));
         };
 
         geminiSession.onmessage = async (msg: any) => {
           if (msg.setupComplete) {
-            console.log(`[Gemini Event] Setup complete for ${uid}.`);
+            console.log(`[Phase3 Gemini] ✅ BidiGenerateContentSetup ACK received — Gemini is READY for ${uid}.`);
           }
           
           // Handle Transcriptions and save to history
           if (msg.serverContent?.modelTurn?.parts) {
             const textPart = msg.serverContent.modelTurn.parts.find((p: any) => p.text);
             if (textPart && textPart.text) {
-              console.log(`[Gemini Content] Model said: ${textPart.text.substring(0, 50)}...`);
+              console.log(`[Phase3 Gemini] Model text → "${textPart.text.substring(0, 80)}"`);
               if (isMongoConnected) {
                 await UserProfile.findOneAndUpdate(
                   { firebaseUid: uid },
                   { $push: { conversation_history: { role: 'model', content: textPart.text, timestamp: new Date() } } }
                 );
               }
-              // Send transcription to UI
               ws.send(JSON.stringify({ type: 'transcript', role: 'Advisor', text: textPart.text }));
             }
 
             // Forward audio from Gemini to Client
             for (const part of msg.serverContent.modelTurn.parts) {
               if (part.inlineData) {
+                geminiAudioChunks++;
+                if (geminiAudioChunks % 50 === 1) {
+                  console.log(`[Phase3 Audio] 🔊 Gemini audio chunk #${geminiAudioChunks} → forwarding to client. Data length: ${part.inlineData.data?.length ?? 0}`);
+                }
                 ws.send(JSON.stringify({ type: 'audio', data: part.inlineData.data }));
               }
             }
@@ -493,7 +509,13 @@ async function startServer() {
 
           // Handle Tool Calls
           if (msg.toolCall) {
+            console.warn(`\n${'🚨'.repeat(10)}`);
+            console.warn(`[Phase4 TOOL CALL] 🚨 AI PAUSED: WAITING FOR TOOL RESPONSE`);
+            console.warn(`[Phase4 TOOL CALL] Function(s) requested: ${msg.toolCall.functionCalls.map((c: any) => c.name).join(', ')}`);
+            console.warn(`[Phase4 TOOL CALL] The AI will produce NO audio until sendToolResponse() is called with matching IDs.`);
+            console.warn(`${'🚨'.repeat(10)}\n`);
             for (const call of msg.toolCall.functionCalls) {
+              console.log(`[Phase4 TOOL CALL] Processing call: name="${call.name}" id="${call.id}"`);
               if (call.name === "save_user_profile") {
                 console.log(`Tool call: save_user_profile for ${uid}`, call.args);
                 
@@ -524,6 +546,7 @@ async function startServer() {
                       id: call.id
                     }]
                   });
+                  console.log(`[Phase4 TOOL CALL] ✅ sendToolResponse sent for "save_user_profile" id="${call.id}". AI should now RESUME.`);
                   
                   ws.send(JSON.stringify({ type: 'status', message: 'Profile saved successfully.' }));
                 } catch (err) {
@@ -537,7 +560,7 @@ async function startServer() {
                   });
                 }
               } else if (call.name === "present_study_plan") {
-                console.log(`Tool call: present_study_plan for ${uid}`, call.args);
+                console.log(`[Phase4 TOOL CALL] present_study_plan for ${uid}`, call.args);
                 ws.send(JSON.stringify({ type: 'study_plan_preview', plan: call.args }));
                 geminiSession.sendToolResponse({
                   functionResponses: [{
@@ -546,8 +569,9 @@ async function startServer() {
                     id: call.id
                   }]
                 });
+                console.log(`[Phase4 TOOL CALL] ✅ sendToolResponse sent for "present_study_plan" id="${call.id}". AI should now RESUME.`);
               } else if (call.name === "save_conversation_summary") {
-                console.log(`Tool call: save_conversation_summary for ${uid}`, call.args);
+                console.log(`[Phase4 TOOL CALL] save_conversation_summary for ${uid}`, call.args);
                 if (!isMongoConnected) {
                   geminiSession.sendToolResponse({
                     functionResponses: [{
@@ -556,6 +580,7 @@ async function startServer() {
                       id: call.id
                     }]
                   });
+                  console.log(`[Phase4 TOOL CALL] ✅ sendToolResponse (no-db) sent for "save_conversation_summary" id="${call.id}". AI should now RESUME.`);
                   continue;
                 }
                 try {
@@ -571,8 +596,9 @@ async function startServer() {
                       id: call.id
                     }]
                   });
+                  console.log(`[Phase4 TOOL CALL] ✅ sendToolResponse sent for "save_conversation_summary" id="${call.id}". AI should now RESUME.`);
                 } catch (err) {
-                  console.error('Error in save_conversation_summary:', err);
+                  console.error('[Phase4 TOOL CALL] ❌ Error in save_conversation_summary:', err);
                   geminiSession.sendToolResponse({
                     functionResponses: [{
                       name: "save_conversation_summary",
@@ -580,9 +606,10 @@ async function startServer() {
                       id: call.id
                     }]
                   });
+                  console.log(`[Phase4 TOOL CALL] ✅ sendToolResponse (error fallback) sent for "save_conversation_summary" id="${call.id}". AI should now RESUME.`);
                 }
               } else if (call.name === "route_user_to_persona_page") {
-                console.log(`Tool call: route_user_to_persona_page for ${uid}`, call.args);
+                console.log(`[Phase4 TOOL CALL] route_user_to_persona_page for ${uid}`, call.args);
                 ws.send(JSON.stringify({ type: 'ui_redirect', route: call.args.target_route }));
                 geminiSession.sendToolResponse({
                   functionResponses: [{
@@ -591,8 +618,9 @@ async function startServer() {
                     id: call.id
                   }]
                 });
+                console.log(`[Phase4 TOOL CALL] ✅ sendToolResponse sent for "route_user_to_persona_page" id="${call.id}". AI should now RESUME.`);
               } else if (call.name === "schedule_partnership_call") {
-                console.log(`Tool call: schedule_partnership_call for ${uid}`, call.args);
+                console.log(`[Phase4 TOOL CALL] schedule_partnership_call for ${uid}`, call.args);
                 const eventLink = await createCalendarEvent(`Partnership Call: ${call.args.company_name} x TechIndiana`, `Partnership discussion.`, call.args.preferred_date, call.args.preferred_time);
                 ws.send(JSON.stringify({ type: 'meeting_scheduled', event_link: eventLink }));
                 geminiSession.sendToolResponse({
@@ -602,8 +630,9 @@ async function startServer() {
                     id: call.id
                   }]
                 });
+                console.log(`[Phase4 TOOL CALL] ✅ sendToolResponse sent for "schedule_partnership_call" id="${call.id}". AI should now RESUME.`);
               } else if (call.name === "schedule_advisor_call") {
-                console.log(`Tool call: schedule_advisor_call for ${uid}`, call.args);
+                console.log(`[Phase4 TOOL CALL] schedule_advisor_call for ${uid}`, call.args);
                 const eventLink = await createCalendarEvent(`Advisor Call: ${call.args.attendee_name}`, `Topic: ${call.args.topic}`, call.args.preferred_date, call.args.preferred_time);
                 ws.send(JSON.stringify({ type: 'meeting_scheduled', event_link: eventLink }));
                 geminiSession.sendToolResponse({
@@ -613,8 +642,9 @@ async function startServer() {
                     id: call.id
                   }]
                 });
+                console.log(`[Phase4 TOOL CALL] ✅ sendToolResponse sent for "schedule_advisor_call" id="${call.id}". AI should now RESUME.`);
               } else if (call.name === "send_counselor_toolkit" || call.name === "send_parent_guide") {
-                console.log(`Tool call: ${call.name} for ${uid}`);
+                console.log(`[Phase4 TOOL CALL] ${call.name} for ${uid}`);
                 const resourceType = call.name === "send_counselor_toolkit" ? "COUNSELOR_TOOLKIT" : "PARENT_GUIDE";
                 let userEmail = "";
                 if (isMongoConnected) {
@@ -630,6 +660,7 @@ async function startServer() {
                       id: call.id
                     }]
                   });
+                  console.log(`[Phase4 TOOL CALL] ✅ sendToolResponse sent for "${call.name}" id="${call.id}". AI should now RESUME.`);
                 } else {
                   geminiSession.sendToolResponse({
                     functionResponses: [{
@@ -638,9 +669,10 @@ async function startServer() {
                       id: call.id
                     }]
                   });
+                  console.warn(`[Phase4 TOOL CALL] ⚠️ sendToolResponse (no email) sent for "${call.name}" id="${call.id}". AI should now RESUME.`);
                 }
               } else if (call.name === "assess_adult_skills") {
-                console.log(`Tool call: assess_adult_skills for ${uid}`, call.args);
+                console.log(`[Phase4 TOOL CALL] assess_adult_skills for ${uid}`, call.args);
                 const recommended_pathway = "IT Success Pathway";
                 const estimated_timeline = "12-18 months";
                 geminiSession.sendToolResponse({
@@ -650,8 +682,9 @@ async function startServer() {
                     id: call.id
                   }]
                 });
+                console.log(`[Phase4 TOOL CALL] ✅ sendToolResponse sent for "assess_adult_skills" id="${call.id}". AI should now RESUME.`);
               } else if (call.name === "show_pathway_comparison") {
-                console.log(`Tool call: show_pathway_comparison for ${uid}`, call.args);
+                console.log(`[Phase4 TOOL CALL] show_pathway_comparison for ${uid}`, call.args);
                 ws.send(JSON.stringify({ type: 'render_comparison', data: call.args.comparison_points }));
                 geminiSession.sendToolResponse({
                   functionResponses: [{
@@ -660,6 +693,9 @@ async function startServer() {
                     id: call.id
                   }]
                 });
+                console.log(`[Phase4 TOOL CALL] ✅ sendToolResponse sent for "show_pathway_comparison" id="${call.id}". AI should now RESUME.`);
+              } else {
+                console.warn(`[Phase4 TOOL CALL] ⚠️  UNHANDLED tool call: "${call.name}" id="${call.id}". AI will be permanently paused! Add a handler.`);
               }
             }
           }

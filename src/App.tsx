@@ -309,47 +309,39 @@ function VoiceAgent() {
         setError("WebSocket connection failed.");
       };
 
+      let geminiAudioChunksReceived = 0;
+
       ws.onmessage = (event) => {
         const msg = JSON.parse(event.data);
-        console.log("Client WS message received:", msg.type, msg.role, msg.text?.substring(0, 30));
         
         if (msg.type === 'audio') {
+          geminiAudioChunksReceived++;
+          if (geminiAudioChunksReceived % 50 === 1) {
+            console.log(`[Phase3 Audio] Gemini audio chunk #${geminiAudioChunksReceived} received from server. Data length: ${msg.data?.length ?? 0}`);
+          }
           queueAudio(msg.data);
         } else if (msg.type === 'transcript') {
+          console.log(`[Phase3 Transcript] ${msg.role}: "${msg.text?.substring(0, 80)}"`);
           setTranscript(prev => [...prev.slice(-49), `${msg.role}: ${msg.text}`]);
         } else if (msg.type === 'status') {
+          console.log(`[Phase3 Status] ${msg.message}`);
           setTranscript(prev => [...prev.slice(-49), `System: ${msg.message}`]);
         } else if (msg.type === 'error') {
+          console.error(`[Phase3 Error] Server reported error: ${msg.message}`);
           setError(msg.message);
         } else if (msg.type === 'study_plan_preview') {
+          console.log('[Phase3] Study plan preview received from server.');
           setStudyPlanPreview(msg.plan);
         } else if (msg.type === 'ui_redirect') {
-          console.log(`Navigating to: ${msg.route}`);
+          console.log(`[Phase3] UI redirect triggered to: ${msg.route}`);
           navigate(msg.route);
         } else if (msg.type === 'meeting_scheduled') {
           setScheduledMeetingLink(msg.event_link);
         } else if (msg.type === 'render_comparison') {
           setComparisonData(msg.data);
+        } else {
+          console.log('[Phase3 WS] Unhandled message type from server:', msg.type);
         }
-      };
-
-      ws.onclose = (event) => {
-        setIsConnected(false);
-        // Only trigger stopMic if it's an unexpected close or intentional.
-        console.log("WebSocket closed", event.code, event.reason);
-        if (event.code !== 1000) {
-          // Check if we should stop the mic based on intent
-          // If we weren't just connecting, it's an error/disconnect
-          if (setIsConnecting) setIsConnecting(false);
-          // DON'T CALL stopMic() here immediately as it destroys the AudioContext
-          // which startMic() might still be initializing.
-          // Instead, just update the connection state.
-          setIsRecording(false);
-        }
-      };
-
-      ws.onerror = () => {
-        setError("WebSocket connection failed.");
       };
 
       // Override sessionRef to use our WebSocket
@@ -417,6 +409,10 @@ function VoiceAgent() {
       const processor = currentContext.createScriptProcessor(4096, 1, 1);
       processorRef.current = processor;
 
+      let micChunksSent = 0;
+      const actualSampleRate = currentContext.sampleRate;
+      console.log(`%c[Phase2 CRITICAL] AudioContext sample rate: ${actualSampleRate}Hz. Expected: ${SAMPLE_RATE}Hz. Match: ${actualSampleRate === SAMPLE_RATE ? '✅ OK' : '❌ MISMATCH - Gemini will fail silently!'}`, actualSampleRate === SAMPLE_RATE ? 'color:green;font-weight:bold' : 'color:red;font-weight:bold;font-size:14px');
+
       processor.onaudioprocess = (e) => {
         // If the context is closed or closing, stop processing
         if (currentContext.state === 'closed') {
@@ -431,7 +427,7 @@ function VoiceAgent() {
           if (Math.abs(inputData[i]) > maxVal) maxVal = Math.abs(inputData[i]);
         }
         if (maxVal > 0.01) {
-          console.log(`[Mic Active] Max volume in this chunk: ${maxVal.toFixed(4)}`);
+          console.log(`[Mic Active] Volume: ${maxVal.toFixed(4)} | SampleRate: ${actualSampleRate}Hz`);
         }
         // ---------------------------
 
@@ -439,10 +435,9 @@ function VoiceAgent() {
         const base64Data = btoa(String.fromCharCode(...new Uint8Array(pcmBuffer)));
         
         if (base64Data.length > 0 && sessionRef.current) {
-          // Send audio if both session and mic are active
-          if (Math.random() < 0.05) { // Just log every ~1 second to check flow
-            // Note: ws was changed to ws2 in some contexts, ensure we use sessionRef or the correct local variable
-            console.log(`[Flow Check] Sending ${base64Data.length} chars.`);
+          micChunksSent++;
+          if (micChunksSent % 50 === 1) {
+            console.log(`[Phase2 Audio] Mic chunk #${micChunksSent} sent → ${base64Data.length} base64 chars | ${pcmBuffer.byteLength} bytes | rate=${actualSampleRate}Hz | 16-bit PCM`);
           }
           sessionRef.current.sendRealtimeInput({
             audio: { data: base64Data, mimeType: `audio/pcm;rate=${SAMPLE_RATE}` }
