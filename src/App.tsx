@@ -282,14 +282,31 @@ function VoiceAgent() {
       }
 
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${protocol}//${window.location.host}/api/voice-agent?token=${token}`;
+      // In production, we must use the service domain name exactly, not window.location.host
+      // which might include non-standard ports or subdomains during proxying.
+      const host = window.location.hostname;
+      const wsUrl = `${protocol}//${host}/api/voice-agent?token=${token}`;
       
+      console.log(`[Flow Check] Connecting to WebSocket: ${wsUrl}`);
       const ws = new WebSocket(wsUrl);
       
       ws.onopen = () => {
+        console.log("[Flow Check] WebSocket connected successfully.");
         setIsConnected(true);
         setIsConnecting(false);
         startMic();
+      };
+
+      ws.onclose = (event) => {
+        console.warn(`[Flow Check] WebSocket closed. Code: ${event.code}, Reason: ${event.reason}`);
+        setIsConnected(false);
+        setIsRecording(false);
+        stopMic();
+      };
+
+      ws.onerror = (event) => {
+        console.error("[Flow Check] WebSocket error occurred.", event);
+        setError("WebSocket connection failed.");
       };
 
       ws.onmessage = (event) => {
