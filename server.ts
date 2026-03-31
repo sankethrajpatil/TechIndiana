@@ -174,6 +174,12 @@ async function startServer() {
   const wss = new WebSocketServer({ noServer: true });
   const PORT = process.env.PORT || 8080;
 
+  // Set COOP header for all responses to allow window.close/closed for Google Auth/Firebase
+  app.use((req, res, next) => {
+    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
+    next();
+  });
+
   app.use(express.json());
 
   // --- REST API: Session Endpoints ---
