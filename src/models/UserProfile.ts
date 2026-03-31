@@ -8,6 +8,7 @@ export interface IMessage {
 
 export interface IUserProfile extends Document {
   firebaseUid: string;
+  email?: string;
   name?: string;
   background?: string;
   expectations?: string;
@@ -18,6 +19,7 @@ export interface IUserProfile extends Document {
 
 const UserProfileSchema: Schema = new Schema({
   firebaseUid: { type: String, required: true, unique: true },
+  email: { type: String, trim: true, lowercase: true },
   name: { type: String, trim: true, minlength: 1 },
   background: { type: String, trim: true, minlength: 1 },
   expectations: { type: String, trim: true, minlength: 1 },

@@ -625,8 +625,8 @@ async function startServer() {
 
                   if (isMongoConnected) {
                     const userDoc = await UserProfile.findOne({ firebaseUid: uid });
-                    if (userDoc && userDoc.email) {
-                      userEmail = userDoc.email;
+                    if (userDoc && (userDoc as any).email) {
+                      userEmail = (userDoc as any).email;
                     }
                   }
 
