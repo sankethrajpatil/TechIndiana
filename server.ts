@@ -16,9 +16,11 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 // --- Firebase Admin Initialization ---
-if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
+const firebaseServiceAccount = process.env.FIREBASE_SERVICE_ACCOUNT || process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+
+if (firebaseServiceAccount) {
   try {
-    let rawValue = process.env.FIREBASE_SERVICE_ACCOUNT_JSON.trim();
+    let rawValue = firebaseServiceAccount.trim();
     
     // Handle cases where the string might be wrapped in single quotes (common in .env files)
     if (rawValue.startsWith("'") && rawValue.endsWith("'")) {
@@ -76,18 +78,29 @@ if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
       throw new Error('Parsed service account is not a valid object or missing project_id.');
     }
   } catch (error) {
-    console.error('Error parsing FIREBASE_SERVICE_ACCOUNT_JSON:', error);
-    if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
-      console.error('Raw value length:', process.env.FIREBASE_SERVICE_ACCOUNT_JSON.length);
-      console.error('Value starts with:', process.env.FIREBASE_SERVICE_ACCOUNT_JSON.substring(0, 50));
+    console.error('Error parsing FIREBASE_SERVICE_ACCOUNT (JSON):', error);
+    if (firebaseServiceAccount) {
+      console.error('Raw value length:', firebaseServiceAccount.length);
+      console.error('Value starts with:', firebaseServiceAccount.substring(0, 50));
     }
   }
 } else {
-  console.warn('FIREBASE_SERVICE_ACCOUNT_JSON not found. Auth middleware will fail.');
+  console.warn('FIREBASE_SERVICE_ACCOUNT or FIREBASE_SERVICE_ACCOUNT_JSON not found. Auth middleware will fail.');
 }
 
 // --- MongoDB Connection ---
-const MONGODB_URI = process.env.MONGODB_URI;
+let MONGODB_URI = process.env.MONGODB_URI;
+
+// If MONGODB_URI doesn't include the database name but MONGODB_DB is provided, append it.
+if (MONGODB_URI && process.env.MONGODB_DB) {
+  // Simple check to append DB name if not already present in basic URI
+  if (MONGODB_URI.endsWith('/')) {
+    MONGODB_URI += process.env.MONGODB_DB;
+  } else if (!MONGODB_URI.includes('/', MONGODB_URI.indexOf('//') + 2)) {
+    MONGODB_URI += '/' + process.env.MONGODB_DB;
+  }
+}
+
 let isMongoConnected = false;
 
 if (MONGODB_URI) {
