@@ -46,7 +46,22 @@ if (!process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
 }
 
 // --- Firebase Admin Initialization ---
-const firebaseServiceAccount = process.env.FIREBASE_SERVICE_ACCOUNT || process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+// Prefer base64-encoded service account if provided, then raw JSON string, then explicit JSON env var.
+let firebaseServiceAccount = undefined as string | undefined;
+if (process.env.FIREBASE_SERVICE_ACCOUNT_BASE64) {
+  try {
+    firebaseServiceAccount = Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT_BASE64, 'base64').toString('utf8');
+    console.log('Using FIREBASE_SERVICE_ACCOUNT_BASE64 for Firebase Admin initialization.');
+  } catch (e) {
+    console.error('Failed to parse FIREBASE_SERVICE_ACCOUNT_BASE64:', e);
+  }
+}
+if (!firebaseServiceAccount && process.env.FIREBASE_SERVICE_ACCOUNT) {
+  firebaseServiceAccount = process.env.FIREBASE_SERVICE_ACCOUNT;
+}
+if (!firebaseServiceAccount && process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
+  firebaseServiceAccount = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+}
 
 if (firebaseServiceAccount) {
   try {
@@ -100,10 +115,16 @@ if (firebaseServiceAccount) {
     serviceAccount = robustParse(rawValue);
 
     if (serviceAccount && typeof serviceAccount === 'object' && serviceAccount.project_id) {
-      admin.initializeApp({
-        credential: admin.credential.cert(serviceAccount),
-      });
-      console.log('Firebase Admin initialized successfully.');
+      // Avoid initializing Firebase Admin multiple times in environments where the module
+      // might be reloaded. Check existing apps first.
+      if (!admin.apps || admin.apps.length === 0) {
+        admin.initializeApp({
+          credential: admin.credential.cert(serviceAccount),
+        });
+        console.log('Firebase Admin initialized successfully.');
+      } else {
+        console.log('Firebase Admin already initialized; skipping initializeApp.');
+      }
     } else {
       throw new Error('Parsed service account is not a valid object or missing project_id.');
     }
@@ -151,7 +172,7 @@ async function startServer() {
   const app = express();
   const server = http.createServer(app);
   const wss = new WebSocketServer({ noServer: true });
-  const PORT = 3000;
+  const PORT = process.env.PORT || 8080;
 
   app.use(express.json());
 
@@ -740,7 +761,7 @@ async function startServer() {
   }
 
   server.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`Server running and listening on 0.0.0.0:${PORT}`);
   });
 }
 
