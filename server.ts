@@ -399,9 +399,11 @@ async function startServer() {
       }
 
       geminiSession = await ai.live.connect({
-        model: 'gemini-2.0-flash-exp',
+        model: 'models/gemini-2.0-flash-exp',
         config: {
-          responseModalities: ['audio'],
+          generationConfig: {
+            responseModalities: ['audio'],
+          },
           systemInstruction: { parts: [{ text: systemInstruction }] },
             tools: [{ 
               functionDeclarations: [
