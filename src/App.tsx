@@ -312,9 +312,14 @@ function VoiceAgent() {
         }
       };
 
-      ws.onclose = () => {
+      ws.onclose = (event) => {
         setIsConnected(false);
-        stopMic();
+        // Only trigger stopMic if it's an unexpected close or intentional.
+        // But avoid race conditions with startMic.
+        console.log("WebSocket closed", event.code, event.reason);
+        if (event.code !== 1000) {
+          stopMic();
+        }
       };
 
       ws.onerror = () => {
@@ -347,14 +352,24 @@ function VoiceAgent() {
 
   const startMic = async () => {
     try {
-      if (!audioContextRef.current) {
+      console.log("startMic triggered. Current state:", audioContextRef.current?.state);
+
+      if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
         audioContextRef.current = new AudioContext({ sampleRate: SAMPLE_RATE });
-      } else if (audioContextRef.current.state === 'suspended') {
+      }
+
+      if (audioContextRef.current.state === 'suspended') {
         await audioContextRef.current.resume();
       }
 
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
+
+      // Critical Check: Did something call stopMic while getUserMedia was waiting?
+      if (!audioContextRef.current) {
+        console.error("AudioContext became null during getUserMedia initialization");
+        return;
+      }
 
       const source = audioContextRef.current.createMediaStreamSource(stream);
       const processor = audioContextRef.current.createScriptProcessor(4096, 1, 1);
