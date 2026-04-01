@@ -301,7 +301,18 @@ function VoiceAgent() {
         console.warn(`[Flow Check] WebSocket closed. Code: ${event.code}, Reason: ${event.reason}`);
         setIsConnected(false);
         setIsRecording(false);
-        stopMic();
+        // Stop stream tracks and disconnect processor, but do NOT close the AudioContext here.
+        // Closing it here creates a race condition: if ws closes while startMic() is awaiting
+        // getUserMedia, stopMic() destroys the context and the mic never starts.
+        // stopConversation() calls stopMic() explicitly for full cleanup when the user ends the session.
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach(t => t.stop());
+          streamRef.current = null;
+        }
+        if (processorRef.current) {
+          processorRef.current.disconnect();
+          processorRef.current = null;
+        }
       };
 
       ws.onerror = (event) => {
