@@ -409,10 +409,11 @@ async function startServer() {
       const systemInstruction = `You are the official voice-based academic advisor for TechIndiana. Your tone is upbeat, technical, encouraging, and welcoming. Ask the student for their name to get started.`;
       
       try {
-        console.log(`[Gemini Handshake] Connecting with model: models/gemini-2.0-flash-live-001 for UID: ${uid}`);
-        
-        const liveConnectOptions = {
-          model: 'models/gemini-2.0-flash-live-001',
+        console.log(`[Gemini Handshake] Connecting with model: gemini-live-2.5-flash-native-audio for UID: ${uid}`);
+
+        console.log(`[Phase3 Gemini] ⏳ Calling ai.live.connect() for UID: ${uid}...`);
+        geminiSession = await ai.live.connect({
+          model: 'gemini-live-2.5-flash-native-audio',
           config: {
             systemInstruction: { parts: [{ text: systemInstruction }] },
             responseModalities: [Modality.AUDIO],
@@ -440,11 +441,6 @@ async function startServer() {
               }
             ]
           },
-        };
-
-        console.log(`[Phase3 Gemini] ⏳ Calling ai.live.connect() for UID: ${uid}...`);
-        geminiSession = await (ai as any).live.connect({
-          ...liveConnectOptions,
           callbacks: {
             onopen: () => {
               console.log(`[Phase3 Gemini] ✅ Gemini session OPEN for ${uid}. Waiting for setupComplete...`);
