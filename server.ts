@@ -392,6 +392,7 @@ async function startServer() {
     });
 
     let geminiSession: any = null;
+    let geminiReady = false;
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
     console.log(`[Phase3 Init] GEMINI_API_KEY present: ${!!process.env.GEMINI_API_KEY} | Length: ${process.env.GEMINI_API_KEY?.length || 0}`);
     console.log(`[Phase3 Init] FIREBASE_ADMIN initialized: ${admin.apps.length > 0}`);
@@ -442,7 +443,7 @@ async function startServer() {
           ...liveConnectOptions,
           callbacks: {
             onopen: () => {
-              console.log(`[Phase3 Gemini] ✅ Gemini session OPEN for ${uid}.`);
+              console.log(`[Phase3 Gemini] ✅ Gemini session OPEN for ${uid}. Waiting for setupComplete...`);
             },
             onclose: () => {
               console.log(`[Phase3 Gemini] ⚠️  Gemini session CLOSED for ${uid}. Closing client WS.`);
@@ -455,6 +456,12 @@ async function startServer() {
             onmessage: async (msg: any) => {
           if (msg.setupComplete) {
             console.log(`[Phase3 Gemini] ✅ BidiGenerateContentSetup ACK received — Gemini is READY for ${uid}.`);
+            geminiReady = true;
+            console.log(`[Phase3 Gemini] Sending initial greeting prompt...`);
+            geminiSession.sendRealtimeInput({
+              text: "Hello, I am a TechIndiana student. Please introduce yourself and ask for my name."
+            });
+            console.log(`[Phase3 Gemini] Initial greeting text sent.`);
           }
           
           // Handle Transcriptions and save to history
@@ -692,11 +699,6 @@ async function startServer() {
       },   // end callbacks
     });    // end live.connect()
         console.log(`[Phase3 Gemini] ✅ ai.live.connect() returned for ${uid}. Type: ${typeof geminiSession}`);
-        console.log(`[Phase3 Gemini] Sending initial greeting prompt...`);
-        geminiSession.sendRealtimeInput({
-          text: "Hello, I am a TechIndiana student. Please introduce yourself and ask for my name."
-        });
-        console.log(`[Phase3 Gemini] Initial greeting text sent.`);
 
       } catch (err: any) {
         console.error('CRITICAL: Gemini connection failed during connect():', err);
@@ -710,7 +712,7 @@ async function startServer() {
         try {
           console.log(`[WS Receive] Raw message length: ${data.length}`);
           const message = JSON.parse(data.toString());
-          if (message.type === 'audio' && geminiSession) {
+          if (message.type === 'audio' && geminiSession && geminiReady) {
             console.log(`[WS Audio] Forwarding ${message.data.length} bytes to Gemini`);
             const base64Audio = message.data.includes(',') ? message.data.split(',')[1] : message.data;
             geminiSession.sendRealtimeInput({
@@ -719,7 +721,7 @@ async function startServer() {
           }
         } catch (err) {
           // Assume raw audio if not JSON
-          if (geminiSession) {
+          if (geminiSession && geminiReady) {
             console.log(`[WS Audio] Forwarding raw data ${data.length} bytes to Gemini`);
             const base64Audio = data.toString('base64');
             geminiSession.sendRealtimeInput({
