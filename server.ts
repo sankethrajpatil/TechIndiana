@@ -393,6 +393,7 @@ async function startServer() {
 
     let geminiSession: any = null;
     let geminiReady = false;
+    let aiTurnActive = false;  // true while Gemini is streaming audio in the current turn
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
     console.log(`[Phase3 Init] GEMINI_API_KEY present: ${!!process.env.GEMINI_API_KEY} | Length: ${process.env.GEMINI_API_KEY?.length || 0}`);
     console.log(`[Phase3 Init] FIREBASE_ADMIN initialized: ${admin.apps.length > 0}`);
@@ -481,6 +482,12 @@ async function startServer() {
             // Forward audio from Gemini to Client
             for (const part of msg.serverContent.modelTurn.parts) {
               if (part.inlineData) {
+                // First audio chunk of a new turn → tell client to mute mic
+                if (!aiTurnActive) {
+                  aiTurnActive = true;
+                  console.log(`[Turn] 🔇 AI started speaking — sending speech_start`);
+                  ws.send(JSON.stringify({ type: 'speech_start' }));
+                }
                 geminiAudioChunks++;
                 if (geminiAudioChunks % 50 === 1) {
                   console.log(`[Phase3 Audio] 🔊 Gemini audio chunk #${geminiAudioChunks} → forwarding to client. Data length: ${part.inlineData.data?.length ?? 0}`);
@@ -488,6 +495,20 @@ async function startServer() {
                 ws.send(JSON.stringify({ type: 'audio', data: part.inlineData.data }));
               }
             }
+          }
+
+          // AI finished its turn → tell client to re-enable mic
+          if (msg.serverContent?.turnComplete && aiTurnActive) {
+            aiTurnActive = false;
+            console.log(`[Turn] 🎤 AI turn complete — sending speech_end`);
+            ws.send(JSON.stringify({ type: 'speech_end' }));
+          }
+
+          // User interrupted AI → also end the turn signal
+          if (msg.serverContent?.interrupted && aiTurnActive) {
+            aiTurnActive = false;
+            console.log(`[Turn] ⚡ AI interrupted — sending speech_end`);
+            ws.send(JSON.stringify({ type: 'speech_end' }));
           }
 
           // Handle user transcriptions if enabled

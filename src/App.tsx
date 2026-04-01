@@ -123,6 +123,8 @@ function VoiceAgent() {
   const sessionRef = useRef<any>(null);
   const audioQueueRef = useRef<AudioBuffer[]>([]);
   const isPlayingRef = useRef(false);
+  // Turn-taking: true while the AI is streaming audio — mic is muted during this window
+  const isAISpeakingRef = useRef(false);
 
   const [studyPlanPreview, setStudyPlanPreview] = useState<{ plan_title: string, action_items: string[] } | null>(null);
   const [isSavingPlan, setIsSavingPlan] = useState(false);
@@ -301,6 +303,7 @@ function VoiceAgent() {
         console.warn(`[Flow Check] WebSocket closed. Code: ${event.code}, Reason: ${event.reason}`);
         setIsConnected(false);
         setIsRecording(false);
+        isAISpeakingRef.current = false;  // always unmute on disconnect
         // Stop stream tracks and disconnect processor, but do NOT close the AudioContext here.
         // Closing it here creates a race condition: if ws closes while startMic() is awaiting
         // getUserMedia, stopMic() destroys the context and the mic never starts.
@@ -331,6 +334,14 @@ function VoiceAgent() {
             console.log(`[Phase3 Audio] Gemini audio chunk #${geminiAudioChunksReceived} received from server. Data length: ${msg.data?.length ?? 0}`);
           }
           queueAudio(msg.data);
+        } else if (msg.type === 'speech_start') {
+          // AI has started speaking — mute mic to prevent echo/overlap
+          isAISpeakingRef.current = true;
+          console.log('%c[Turn] 🔇 AI speaking → mic muted', 'color:orange;font-weight:bold');
+        } else if (msg.type === 'speech_end') {
+          // AI finished speaking — unmute mic so user can respond
+          isAISpeakingRef.current = false;
+          console.log('%c[Turn] 🎤 AI done → mic active', 'color:green;font-weight:bold');
         } else if (msg.type === 'transcript') {
           console.log(`[Phase3 Transcript] ${msg.role}: "${msg.text?.substring(0, 80)}"`);
           setTranscript(prev => [...prev.slice(-49), `${msg.role}: ${msg.text}`]);
@@ -427,6 +438,11 @@ function VoiceAgent() {
       processor.onaudioprocess = (e) => {
         // If the context is closed or closing, stop processing
         if (currentContext.state === 'closed') {
+          return;
+        }
+
+        // Turn-taking: drop mic audio while AI is speaking to avoid echo/overlap
+        if (isAISpeakingRef.current) {
           return;
         }
 
