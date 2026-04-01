@@ -443,11 +443,6 @@ async function startServer() {
           callbacks: {
             onopen: () => {
               console.log(`[Phase3 Gemini] ✅ Gemini session OPEN for ${uid}.`);
-              console.log(`[Phase3 Gemini] Sending initial greeting prompt...`);
-              geminiSession.sendRealtimeInput({
-                text: "Hello, I am a TechIndiana student. Please introduce yourself and ask for my name."
-              });
-              console.log(`[Phase3 Gemini] Initial greeting text sent.`);
             },
             onclose: () => {
               console.log(`[Phase3 Gemini] ⚠️  Gemini session CLOSED for ${uid}. Closing client WS.`);
@@ -697,6 +692,11 @@ async function startServer() {
       },   // end callbacks
     });    // end live.connect()
         console.log(`[Phase3 Gemini] ✅ ai.live.connect() returned for ${uid}. Type: ${typeof geminiSession}`);
+        console.log(`[Phase3 Gemini] Sending initial greeting prompt...`);
+        geminiSession.sendRealtimeInput({
+          text: "Hello, I am a TechIndiana student. Please introduce yourself and ask for my name."
+        });
+        console.log(`[Phase3 Gemini] Initial greeting text sent.`);
 
       } catch (err: any) {
         console.error('CRITICAL: Gemini connection failed during connect():', err);
