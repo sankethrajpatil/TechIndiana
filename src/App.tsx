@@ -335,13 +335,15 @@ function VoiceAgent() {
           }
           queueAudio(msg.data);
         } else if (msg.type === 'speech_start') {
-          // AI has started speaking — mute mic to prevent echo/overlap
+          // AI has started speaking — physically disconnect processor + set flag
           isAISpeakingRef.current = true;
-          console.log('%c[Turn] 🔇 AI speaking → mic muted', 'color:orange;font-weight:bold');
+          pauseMic();
+          console.log('%c[Turn] 🛑 AI speaking → mic disconnected', 'color:orange;font-weight:bold');
         } else if (msg.type === 'speech_end') {
-          // AI finished speaking — unmute mic so user can respond
+          // AI finished speaking — reconnect processor + clear flag
           isAISpeakingRef.current = false;
-          console.log('%c[Turn] 🎤 AI done → mic active', 'color:green;font-weight:bold');
+          resumeMic();
+          console.log('%c[Turn] 🎤 AI done → mic reconnected', 'color:green;font-weight:bold');
         } else if (msg.type === 'transcript') {
           console.log(`[Phase3 Transcript] ${msg.role}: "${msg.text?.substring(0, 80)}"`);
           setTranscript(prev => [...prev.slice(-49), `${msg.role}: ${msg.text}`]);
@@ -470,6 +472,16 @@ function VoiceAgent() {
             audio: { data: base64Data, mimeType: `audio/pcm;rate=${SAMPLE_RATE}` }
           });
         }
+      };
+
+      // pauseMic / resumeMic: physically disconnect/reconnect the processor so
+      // no audio events fire at all while the AI is speaking (belt-and-suspenders
+      // on top of the isAISpeakingRef flag guard in onaudioprocess).
+      const pauseMic = () => {
+        try { processor.disconnect(); } catch (_) {}
+      };
+      const resumeMic = () => {
+        try { processor.connect(currentContext.destination); } catch (_) {}
       };
 
       source.connect(processor);
