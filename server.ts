@@ -408,19 +408,17 @@ async function startServer() {
       const systemInstruction = `You are the official voice-based academic advisor for TechIndiana. Your tone is upbeat, technical, encouraging, and welcoming. Ask the student for their name to get started.`;
       
       try {
-        console.log(`[Gemini Handshake] Connecting with model: models/gemini-2.0-flash-exp for UID: ${uid}`);
+        console.log(`[Gemini Handshake] Connecting with model: models/gemini-2.0-flash-live-001 for UID: ${uid}`);
         
         const liveConnectOptions = {
-          model: 'models/gemini-2.0-flash-exp',
+          model: 'models/gemini-2.0-flash-live-001',
           config: {
             systemInstruction: { parts: [{ text: systemInstruction }] },
-            generationConfig: {
-              responseModalities: ["audio"],
-              speechConfig: {
-                voiceConfig: {
-                  prebuiltVoiceConfig: {
-                    voiceName: "Puck"
-                  }
+            responseModalities: ["audio"],
+            speechConfig: {
+              voiceConfig: {
+                prebuiltVoiceConfig: {
+                  voiceName: "Puck"
                 }
               }
             },
@@ -440,30 +438,26 @@ async function startServer() {
         };
 
         console.log(`[Phase3 Gemini] ⏳ Calling ai.live.connect() for UID: ${uid}...`);
-        geminiSession = await (ai as any).live.connect(liveConnectOptions);
-        console.log(`[Phase3 Gemini] ✅ ai.live.connect() returned a session object for ${uid}. Type: ${typeof geminiSession}`);
-
-        // Setup session message handling
-        geminiSession.onopen = () => {
-          console.log(`[Phase3 Gemini] ✅ Gemini session OPEN (BidiGenerateContentSetup sent) for ${uid}.`);
-          console.log(`[Phase3 Gemini] Sending initial greeting prompt to trigger first audio response...`);
-          geminiSession.sendRealtimeInput({
-            text: "Hello, I am a TechIndiana student. Please introduce yourself and ask for my name."
-          });
-          console.log(`[Phase3 Gemini] Initial greeting text sent.`);
-        };
-
-        geminiSession.onclose = () => {
-          console.log(`[Phase3 Gemini] ⚠️  Gemini session CLOSED for ${uid}. Closing client WS.`);
-          if (ws.readyState === ws.OPEN) ws.close();
-        };
-
-        geminiSession.onerror = (err: any) => {
-          console.error(`[Phase3 Gemini] ❌ Gemini session ERROR for ${uid}:`, err);
-          ws.send(JSON.stringify({ type: 'error', message: 'Gemini connection error.' }));
-        };
-
-        geminiSession.onmessage = async (msg: any) => {
+        geminiSession = await (ai as any).live.connect({
+          ...liveConnectOptions,
+          callbacks: {
+            onopen: () => {
+              console.log(`[Phase3 Gemini] ✅ Gemini session OPEN for ${uid}.`);
+              console.log(`[Phase3 Gemini] Sending initial greeting prompt...`);
+              geminiSession.sendRealtimeInput({
+                text: "Hello, I am a TechIndiana student. Please introduce yourself and ask for my name."
+              });
+              console.log(`[Phase3 Gemini] Initial greeting text sent.`);
+            },
+            onclose: () => {
+              console.log(`[Phase3 Gemini] ⚠️  Gemini session CLOSED for ${uid}. Closing client WS.`);
+              if (ws.readyState === ws.OPEN) ws.close();
+            },
+            onerror: (err: any) => {
+              console.error(`[Phase3 Gemini] ❌ Gemini session ERROR for ${uid}:`, err);
+              ws.send(JSON.stringify({ type: 'error', message: 'Gemini connection error.' }));
+            },
+            onmessage: async (msg: any) => {
           if (msg.setupComplete) {
             console.log(`[Phase3 Gemini] ✅ BidiGenerateContentSetup ACK received — Gemini is READY for ${uid}.`);
           }
@@ -699,7 +693,10 @@ async function startServer() {
               }
             }
           }
-        };
+        },  // end onmessage
+      },   // end callbacks
+    });    // end live.connect()
+        console.log(`[Phase3 Gemini] ✅ ai.live.connect() returned for ${uid}. Type: ${typeof geminiSession}`);
 
       } catch (err: any) {
         console.error('CRITICAL: Gemini connection failed during connect():', err);
