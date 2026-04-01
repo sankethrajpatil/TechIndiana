@@ -415,7 +415,7 @@ async function startServer() {
           model: 'models/gemini-2.0-flash-live-001',
           config: {
             systemInstruction: { parts: [{ text: systemInstruction }] },
-            responseModalities: ["audio"],
+            responseModalities: [Modality.AUDIO],
             speechConfig: {
               voiceConfig: {
                 prebuiltVoiceConfig: {
@@ -424,16 +424,20 @@ async function startServer() {
               }
             },
             tools: [
-              { functionDeclarations: [saveUserProfileTool] },
-              { functionDeclarations: [presentStudyPlanTool] },
-              { functionDeclarations: [saveConversationSummaryTool] },
-              { functionDeclarations: [routeUserToPersonaPageTool] },
-              { functionDeclarations: [schedulePartnershipCallTool] },
-              { functionDeclarations: [scheduleAdvisorCallTool] },
-              { functionDeclarations: [sendCounselorToolkitTool] },
-              { functionDeclarations: [sendParentGuideTool] },
-              { functionDeclarations: [assessAdultSkillsTool] },
-              { functionDeclarations: [showPathwayComparisonTool] }
+              {
+                functionDeclarations: [
+                  saveUserProfileTool,
+                  presentStudyPlanTool,
+                  saveConversationSummaryTool,
+                  routeUserToPersonaPageTool,
+                  schedulePartnershipCallTool,
+                  scheduleAdvisorCallTool,
+                  sendCounselorToolkitTool,
+                  sendParentGuideTool,
+                  assessAdultSkillsTool,
+                  showPathwayComparisonTool
+                ]
+              }
             ]
           },
         };
