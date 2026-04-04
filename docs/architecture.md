@@ -12,7 +12,7 @@ graph TD
     subgraph "AI Core"
         Backend <-->|Gemini Live API| Gemini[Gemini 1.5/2.0 Advisor]
         Gemini -->|Tool Call| Backend
-    </div>
+    end
     
     subgraph "Integrations"
         Backend -->|Google Calendar API| Calendar[Scheduling Service]
