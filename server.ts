@@ -351,6 +351,18 @@ async function startServer() {
     }
   };
 
+  const extractAndSaveMemoryTool: FunctionDeclaration = {
+    name: "extract_and_save_memory",
+    description: "Use this tool whenever the user shares a new, important personal fact, preference, roadblock, or career aspiration. This saves the fact to their permanent profile.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        memory_fact: { type: Type.STRING, description: "A concise, 1-sentence summary of the important fact to remember." }
+      },
+      required: ["memory_fact"]
+    }
+  };
+
   const showPathwayComparisonTool: FunctionDeclaration = {
     name: "show_pathway_comparison",
     description: "Pushes a visual, side-by-side comparison of the TechIndiana Apprenticeship vs. Traditional 4-Year College to the user's screen. Use this when a parent asks how the program compares to college, or asks about costs, timelines, and outcomes.",
@@ -407,7 +419,13 @@ async function startServer() {
       }
       
       // 2. Connect to Gemini Live API
-      const systemInstruction = `You are the official voice-based academic advisor for TechIndiana. Your tone is upbeat, technical, encouraging, and welcoming. Ask the student for their name to get started.`;
+      let memoryInjection = "";
+      if (profile && profile.saved_memories && profile.saved_memories.length > 0) {
+        memoryInjection = `\n\n### User's Past Memories:\n- ${profile.saved_memories.join('\n- ')}\n\nReview the past memories above. Welcome the user back naturally and use these facts to personalize your advice. Do not ask them for this information again.`;
+        console.log(`[Phase3 Gemini] 🧠 Injecting ${profile.saved_memories.length} past memories for ${uid}.`);
+      }
+
+      const systemInstruction = `You are the official voice-based academic advisor for TechIndiana. Your tone is upbeat, technical, encouraging, and welcoming. Ask the student for their name to get started.${memoryInjection}`;
       
       try {
         console.log(`[Gemini Handshake] Connecting with model: gemini-2.5-flash-native-audio-preview-12-2025 for UID: ${uid}`);
@@ -437,7 +455,8 @@ async function startServer() {
                   sendCounselorToolkitTool,
                   sendParentGuideTool,
                   assessAdultSkillsTool,
-                  showPathwayComparisonTool
+                  showPathwayComparisonTool,
+                  extractAndSaveMemoryTool
                 ]
               }
             ]
@@ -711,6 +730,45 @@ async function startServer() {
                   }]
                 });
                 console.log(`[Phase4 TOOL CALL] ✅ sendToolResponse sent for "show_pathway_comparison" id="${call.id}". AI should now RESUME.`);
+              } else if (call.name === "extract_and_save_memory") {
+                console.log(`[Phase4 TOOL CALL] extract_and_save_memory for ${uid}`, call.args);
+                const memoryFact = call.args.memory_fact;
+
+                if (isMongoConnected) {
+                  try {
+                    await UserProfile.findOneAndUpdate(
+                      { firebaseUid: uid },
+                      { $push: { saved_memories: memoryFact } }
+                    );
+                    console.log(`[Phase4 TOOL CALL] ✅ Memory saved to MongoDB: "${memoryFact}"`);
+                    
+                    geminiSession.sendToolResponse({
+                      functionResponses: [{
+                        name: "extract_and_save_memory",
+                        response: { success: true, message: "Memory saved to long-term storage." },
+                        id: call.id
+                      }]
+                    });
+                  } catch (err) {
+                    console.error('Error saving memory to MongoDB:', err);
+                    geminiSession.sendToolResponse({
+                      functionResponses: [{
+                        name: "extract_and_save_memory",
+                        response: { success: false, error: "Database error" },
+                        id: call.id
+                      }]
+                    });
+                  }
+                } else {
+                  console.warn('Cannot save memory: MongoDB not connected.');
+                  geminiSession.sendToolResponse({
+                    functionResponses: [{
+                      name: "extract_and_save_memory",
+                      response: { success: false, error: "Database not connected" },
+                      id: call.id
+                    }]
+                  });
+                }
               } else {
                 console.warn(`[Phase4 TOOL CALL] ⚠️  UNHANDLED tool call: "${call.name}" id="${call.id}". AI will be permanently paused! Add a handler.`);
               }
