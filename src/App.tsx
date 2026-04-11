@@ -286,7 +286,7 @@ function VoiceAgent() {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       // In production, we must use the service domain name exactly, not window.location.host
       // which might include non-standard ports or subdomains during proxying.
-      const host = window.location.hostname;
+      const host = window.location.host;
       const wsUrl = `${protocol}//${host}/api/voice-agent?token=${token}`;
       
       console.log(`[Flow Check] Connecting to WebSocket: ${wsUrl}`);
