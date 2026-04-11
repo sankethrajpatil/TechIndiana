@@ -6,6 +6,7 @@ import { auth, db } from './firebase';
 import { Mic, MicOff, LogIn, LogOut, BookOpen, Sparkles, Loader2, CheckCircle2, Users, GraduationCap, Briefcase, UserCircle, Sun, Moon } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { BrowserRouter, Routes, Route, useNavigate, Link } from 'react-router-dom';
+import UserProfilePage from './UserProfilePage';
 
 // --- Audio Helpers ---
 const SAMPLE_RATE = 16000;
@@ -538,10 +539,18 @@ function VoiceAgent() {
 
           {user ? (
             <div className="flex items-center gap-4">
-              <div className="hidden sm:flex flex-col items-end">
-                <span className="text-sm font-medium">{user.displayName}</span>
-                <span className="text-[10px] text-[var(--text-secondary)]">Student ID: {user.uid.slice(0, 8)}</span>
-              </div>
+              <Link
+                to="/profile"
+                className="flex flex-col items-end max-w-[11rem] sm:max-w-none min-w-0 group rounded-lg px-1 -mr-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-primary)]"
+                title="View profile"
+              >
+                <span className="text-sm font-medium truncate text-right group-hover:text-blue-600 transition-colors">
+                  {user.displayName || user.email || 'Profile'}
+                </span>
+                <span className="text-[10px] text-[var(--text-secondary)] hidden sm:block">
+                  Student ID: {user.uid.slice(0, 8)}
+                </span>
+              </Link>
               <button 
                 onClick={handleLogout}
                 className="p-2 hover:bg-[var(--bg-secondary)] rounded-full transition-colors group"
@@ -947,6 +956,7 @@ export default function App() {
         <Route path="/adult-learners" element={<AdultLearnerPage />} />
         <Route path="/employers" element={<EmployerPage />} />
         <Route path="/counselors" element={<CounselorPage />} />
+        <Route path="/profile" element={<UserProfilePage />} />
       </Routes>
     </BrowserRouter>
   );
