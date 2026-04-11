@@ -416,16 +416,36 @@ async function startServer() {
       let profile = null;
       if (isMongoConnected) {
         profile = await UserProfile.findOne({ firebaseUid: uid });
+        
+        // If profile doesn't exist, try to create a basic one from Firebase Auth
+        if (!profile) {
+          try {
+            const userRecord = await admin.auth().getUser(uid);
+            profile = await UserProfile.findOneAndUpdate(
+              { firebaseUid: uid },
+              { 
+                name: userRecord.displayName || "Student",
+                email: userRecord.email
+              },
+              { new: true, upsert: true }
+            );
+            console.log(`[Phase3 Init] 🆕 Created new profile for UID: ${uid} (Name: ${profile.name})`);
+          } catch (e) {
+            console.warn(`[Phase3 Init] Could not fetch user from Firebase Admin:`, e);
+          }
+        }
       }
       
       // 2. Connect to Gemini Live API
       let memoryInjection = "";
+      const userName = profile?.name || "Student";
+
       if (profile && profile.saved_memories && profile.saved_memories.length > 0) {
-        memoryInjection = `\n\n### User's Past Memories:\n- ${profile.saved_memories.join('\n- ')}\n\nReview the past memories above. Welcome the user back naturally and use these facts to personalize your advice. Do not ask them for this information again.`;
+        memoryInjection = `\n\n### User's Past Memories:\n- ${profile.saved_memories.join('\n- ')}\n\nReview the past memories above. Welcome ${userName} back naturally and use these facts to personalize your advice. Do not ask for their name or any information already mentioned in these memories.`;
         console.log(`[Phase3 Gemini] 🧠 Injecting ${profile.saved_memories.length} past memories for ${uid}.`);
       }
 
-      const systemInstruction = `You are the official voice-based academic advisor for TechIndiana. Your tone is upbeat, technical, encouraging, and welcoming. Ask the student for their name to get started.${memoryInjection}`;
+      const systemInstruction = `You are the official voice-based academic advisor for TechIndiana. Your tone is upbeat, technical, encouraging, and welcoming. You are currently speaking with ${userName}. Address them by name and begin providing personalized career guidance based on their profile and past interactions. Do not ask for their name as you already have it.${memoryInjection}`;
       
       try {
         console.log(`[Gemini Handshake] Connecting with model: gemini-2.5-flash-native-audio-preview-12-2025 for UID: ${uid}`);
@@ -478,10 +498,12 @@ async function startServer() {
             console.log(`[Phase3 Gemini] ✅ BidiGenerateContentSetup ACK received — Gemini is READY for ${uid}.`);
             geminiReady = true;
             console.log(`[Phase3 Gemini] Sending initial greeting prompt...`);
+            
+            const userName = profile?.name || "Student";
             geminiSession.sendRealtimeInput({
-              text: "Hello, I am a TechIndiana student. Please introduce yourself and ask for my name."
+              text: `Hello, I am ${userName}, a TechIndiana user. Please greet me by name and ask if I'm ready to continue our career exploration.`
             });
-            console.log(`[Phase3 Gemini] Initial greeting text sent.`);
+            console.log(`[Phase3 Gemini] Initial greeting text sent for user: ${userName}`);
           }
           
           // Handle Transcriptions and save to history
