@@ -49,3 +49,19 @@ Detailed technical documentation can be found in the [docs/](docs/) folder:
    ```bash
    npm run dev
    ```
+
+## 🧠 Agentic Memory & Rules
+
+The TechIndiana AI utilizes a structured agentic memory and rule repository located in [.claude/](.claude/) to maintain context and follow strict execution protocols.
+
+### 📜 Engineering Rules
+- **Synchronous Tool Calling:** All function calls from the Gemini Live API MUST be matched by a synchronous `functionResponse` with a corresponding `id` before the AI resumes speaking.
+- **Audio Standards:** All inbound/outbound audio must be resampled to **16kHz, 16-bit signed PCM** (Mono) for compatibility with the Gemini 3.1 Live API.
+- **Barge-in Logic:** The system implements strict audio flushing when user speech is detected to ensure a natural conversational "barge-in" experience.
+- **Styling Standards:** Adhere to the `#4A4F76` purple accent for AI elements and `dark:bg-slate-900` for dark mode backgrounds as defined in [rules/reflex.md](.claude/rules/reflex.md).
+
+### 🛠️ Local Execution & Skills
+- **Skill Orchestration:** Core business logic is abstracted into [skills/](.claude/skills/) (e.g., `email-actions`, `workflow-orchestration`).
+- **State Management:** The global terminal and UI state is tracked via [memory/ui_state.json](.claude/memory/ui_state.json).
+- **Future-Proofing:** For future Python-based evaluation or multi-agent LangGraph flows, follow the guidelines in [rules/python.md](.claude/rules/python.md) and [rules/langgraph.md](.claude/rules/langgraph.md).
+
