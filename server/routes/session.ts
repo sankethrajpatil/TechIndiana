@@ -17,6 +17,15 @@ const transporter = nodemailer.createTransport({
   },
 });
 
+// Test transporter connection on startup
+transporter.verify((error, success) => {
+  if (error) {
+    console.error('NODEMAILER ERROR: Transporter verification failed:', error);
+  } else {
+    console.log('NODEMAILER SUCCESS: Server is ready to take our messages');
+  }
+});
+
 router.post('/end', firebaseAuthMiddleware, async (req: any, res) => {
   const firebaseUid = req.uid;
   if (!firebaseUid) return res.status(401).json({ error: 'Unauthorized' });
