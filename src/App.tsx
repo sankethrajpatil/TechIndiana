@@ -769,8 +769,20 @@ function VoiceAgent() {
                 </AnimatePresence>
 
                 {error && (
-                  <div className="absolute bottom-4 left-4 right-4 bg-red-500/20 border border-red-500/40 p-3 rounded-xl text-red-200 text-sm">
-                    {error}
+                  <div className="absolute bottom-4 left-4 right-4 bg-red-600 border border-red-700 p-4 rounded-xl text-white text-sm font-bold shadow-2xl z-50 flex items-center gap-3">
+                    <div className="bg-white/20 p-2 rounded-lg">
+                      <MicOff className="w-5 h-5" />
+                    </div>
+                    <div className="flex-1">
+                      <p className="uppercase tracking-widest text-[10px] opacity-80 mb-1">System Error</p>
+                      <p>{error}</p>
+                    </div>
+                    <button 
+                      onClick={() => setError(null)}
+                      className="text-white underline text-xs font-bold px-2 py-1 hover:bg-black/10 rounded-md transition-all"
+                    >
+                      Clear
+                    </button>
                   </div>
                 )}
               </div>
