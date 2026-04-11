@@ -10,7 +10,9 @@ const router = express.Router();
 // NOTE: For production, use environment variables for credentials.
 // For testing, you can use Ethereal or a Gmail App Password.
 const transporter = nodemailer.createTransport({
-  service: 'gmail',
+  host: 'smtp.gmail.com',
+  port: 465,
+  secure: true, // Use SSL
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS,
@@ -21,8 +23,11 @@ const transporter = nodemailer.createTransport({
 transporter.verify((error, success) => {
   if (error) {
     console.error('NODEMAILER ERROR: Transporter verification failed:', error);
+    console.error('DEBUG: EMAIL_USER check:', process.env.EMAIL_USER ? 'Present' : 'Missing');
+    // Don't log the actual pass for security, just presence
+    console.error('DEBUG: EMAIL_PASS check:', process.env.EMAIL_PASS ? 'Present' : 'Missing');
   } else {
-    console.log('NODEMAILER SUCCESS: Server is ready to take our messages');
+    console.log('NODEMAILER SUCCESS: Email server is ready');
   }
 });
 
