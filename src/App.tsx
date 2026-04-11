@@ -126,6 +126,8 @@ function VoiceAgent() {
   const isPlayingRef = useRef(false);
   // Turn-taking: true while the AI is streaming audio — mic is muted during this window
   const isAISpeakingRef = useRef(false);
+  const pauseMicRef = useRef<(() => void) | null>(null);
+  const resumeMicRef = useRef<(() => void) | null>(null);
 
   const [studyPlanPreview, setStudyPlanPreview] = useState<{ plan_title: string, action_items: string[] } | null>(null);
   const [isSavingPlan, setIsSavingPlan] = useState(false);
@@ -285,10 +287,9 @@ function VoiceAgent() {
       }
 
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      // In production, we must use the service domain name exactly, not window.location.host
-      // which might include non-standard ports or subdomains during proxying.
-      const host = window.location.hostname;
-      const wsUrl = `${protocol}//${host}/api/voice-agent?token=${token}`;
+      // Use host (hostname + port) so dev URLs like http://localhost:8080 upgrade to
+      // ws://localhost:8080 — hostname alone targets the wrong port and the socket fails.
+      const wsUrl = `${protocol}//${window.location.host}/api/voice-agent?token=${encodeURIComponent(token)}`;
       
       console.log(`[Flow Check] Connecting to WebSocket: ${wsUrl}`);
       const ws = new WebSocket(wsUrl);
@@ -338,12 +339,12 @@ function VoiceAgent() {
         } else if (msg.type === 'speech_start') {
           // AI has started speaking — physically disconnect processor + set flag
           isAISpeakingRef.current = true;
-          pauseMic();
+          pauseMicRef.current?.();
           console.log('%c[Turn] 🛑 AI speaking → mic disconnected', 'color:orange;font-weight:bold');
         } else if (msg.type === 'speech_end') {
           // AI finished speaking — reconnect processor + clear flag
           isAISpeakingRef.current = false;
-          resumeMic();
+          resumeMicRef.current?.();
           console.log('%c[Turn] 🎤 AI done → mic reconnected', 'color:green;font-weight:bold');
         } else if (msg.type === 'transcript') {
           console.log(`[Phase3 Transcript] ${msg.role}: "${msg.text?.substring(0, 80)}"`);
@@ -485,6 +486,9 @@ function VoiceAgent() {
         try { processor.connect(currentContext.destination); } catch (_) {}
       };
 
+      pauseMicRef.current = pauseMic;
+      resumeMicRef.current = resumeMic;
+
       source.connect(processor);
       processor.connect(currentContext.destination);
       setIsRecording(true);
@@ -503,6 +507,8 @@ function VoiceAgent() {
       processorRef.current.disconnect();
       processorRef.current = null;
     }
+    pauseMicRef.current = null;
+    resumeMicRef.current = null;
     if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
       try {
         await audioContextRef.current.close();

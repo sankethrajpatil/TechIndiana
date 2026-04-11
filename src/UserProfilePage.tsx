@@ -11,7 +11,6 @@ import {
   Mail,
   ShieldCheck,
   Calendar,
-  Fingerprint,
   Sparkles,
 } from 'lucide-react';
 import { auth, db } from './firebase';
@@ -120,11 +119,6 @@ export default function UserProfilePage() {
       icon: <Calendar className="w-4 h-4" />,
     },
     { label: 'Sign-in provider', value: providerLabel },
-    {
-      label: 'User ID',
-      value: user.uid,
-      icon: <Fingerprint className="w-4 h-4" />,
-    },
   ];
 
   return (
