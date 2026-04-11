@@ -18,6 +18,8 @@ import { sendResourceEmail } from './server/services/emailService';
 import dotenv from 'dotenv';
 
 dotenv.config();
+// Also load src/.env (common when env files live next to frontend); does not override existing vars.
+dotenv.config({ path: path.join(process.cwd(), 'src', '.env') });
 
 // Global error handling to prevent 1005 WebSocket closures from silent crashes
 process.on("uncaughtException", (err) => {
@@ -394,8 +396,23 @@ async function startServer() {
     let geminiSession: any = null;
     let geminiReady = false;
     let aiTurnActive = false;  // true while Gemini is streaming audio in the current turn
-    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-    console.log(`[Phase3 Init] GEMINI_API_KEY present: ${!!process.env.GEMINI_API_KEY} | Length: ${process.env.GEMINI_API_KEY?.length || 0}`);
+    const geminiApiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+    if (!geminiApiKey) {
+      console.error('[Phase3 Init] Missing GEMINI_API_KEY or GOOGLE_API_KEY (check project root .env or src/.env).');
+      if (ws.readyState === ws.OPEN) {
+        ws.send(
+          JSON.stringify({
+            type: 'error',
+            message:
+              'Advisor service is not configured: add GEMINI_API_KEY or GOOGLE_API_KEY to .env in the project root or src/.env, then restart the server.',
+          })
+        );
+      }
+      ws.close();
+      return;
+    }
+    const ai = new GoogleGenAI({ apiKey: geminiApiKey });
+    console.log(`[Phase3 Init] Gemini API key present: true | Length: ${geminiApiKey.length}`);
     console.log(`[Phase3 Init] FIREBASE_ADMIN initialized: ${admin.apps.length > 0}`);
     console.log(`[Phase3 Init] MongoDB connected: ${isMongoConnected}`);
 
@@ -766,51 +783,10 @@ async function startServer() {
     }
   });
 
-  // Upgrade HTTP to WebSocket
-  server.on('upgrade', async (request, socket, head) => {
-    const url = new URL(request.url!, `http://${request.headers.host}`);
-    if (url.pathname === '/api/voice-agent') {
-      const token = url.searchParams.get('token');
-      console.log('WebSocket upgrade request token:', token ? `${token.substring(0, 60)}${token.length > 60 ? '...' : ''}` : '<<none>>');
-
-      if (!token) {
-        socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
-        socket.destroy();
-        return;
-      }
-
-      // Development shortcut: accept dev:<uid> tokens locally without calling Firebase
-      let uid: string | null = null;
-      try {
-        if (process.env.NODE_ENV !== 'production' && token.startsWith('dev:')) {
-          uid = token.split('dev:')[1] || null;
-          console.log('Using dev token for WebSocket upgrade. UID:', uid ? uid.substring(0, 12) : 'null');
-        } else {
-          uid = await verifyWebSocketToken(token);
-        }
-      } catch (err) {
-        console.error('Error while verifying WebSocket token during upgrade:', err);
-        uid = null;
-      }
-
-      if (!uid) {
-        socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
-        socket.destroy();
-        return;
-      }
-
-      wss.handleUpgrade(request, socket, head, (ws) => {
-        wss.emit('connection', ws, request, uid);
-      });
-    } else {
-      socket.destroy();
-    }
-  });
-
-  // --- Vite Middleware for Frontend ---
+  // --- Vite / static before voice upgrade so HMR can attach to the same http.Server ---
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: { middlewareMode: true, hmr: { server } },
       appType: 'spa',
     });
     app.use(vite.middlewares);
@@ -821,6 +797,46 @@ async function startServer() {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
+
+  // Upgrade HTTP to WebSocket — only handle voice agent; leave other paths (e.g. Vite HMR) alone.
+  server.on('upgrade', async (request, socket, head) => {
+    const url = new URL(request.url!, `http://${request.headers.host}`);
+    if (url.pathname !== '/api/voice-agent') {
+      return;
+    }
+
+    const token = url.searchParams.get('token');
+    console.log('WebSocket upgrade request token:', token ? `${token.substring(0, 60)}${token.length > 60 ? '...' : ''}` : '<<none>>');
+
+    if (!token) {
+      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+
+    let uid: string | null = null;
+    try {
+      if (process.env.NODE_ENV !== 'production' && token.startsWith('dev:')) {
+        uid = token.split('dev:')[1] || null;
+        console.log('Using dev token for WebSocket upgrade. UID:', uid ? uid.substring(0, 12) : 'null');
+      } else {
+        uid = await verifyWebSocketToken(token);
+      }
+    } catch (err) {
+      console.error('Error while verifying WebSocket token during upgrade:', err);
+      uid = null;
+    }
+
+    if (!uid) {
+      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+
+    wss.handleUpgrade(request, socket, head, (ws) => {
+      wss.emit('connection', ws, request, uid);
+    });
+  });
 
   server.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running and listening on 0.0.0.0:${PORT}`);
