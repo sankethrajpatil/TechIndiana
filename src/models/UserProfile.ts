@@ -10,18 +10,21 @@ export interface IUserProfile extends Document {
   firebaseUid: string;
   email?: string;
   name?: string;
+  role?: 'student' | 'counselor' | 'admin';
   background?: string;
   expectations?: string;
   study_plan?: string;
   conversation_summary?: string;
   conversation_history?: IMessage[];
   saved_memories?: string[];
+  assigned_counselor?: string;
 }
 
 const UserProfileSchema: Schema = new Schema({
   firebaseUid: { type: String, required: true, unique: true },
   email: { type: String, trim: true, lowercase: true },
   name: { type: String, trim: true, minlength: 1 },
+  role: { type: String, enum: ['student', 'counselor', 'admin'], default: 'student' },
   background: { type: String, trim: true, minlength: 1 },
   expectations: { type: String, trim: true, minlength: 1 },
   study_plan: { type: String },
@@ -32,6 +35,7 @@ const UserProfileSchema: Schema = new Schema({
     timestamp: { type: Date, default: Date.now }
   }],
   saved_memories: [{ type: String, trim: true }],
+  assigned_counselor: { type: String },
 }, { timestamps: true });
 
 export default mongoose.model<IUserProfile>('UserProfile', UserProfileSchema);
