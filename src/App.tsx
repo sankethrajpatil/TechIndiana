@@ -6,6 +6,7 @@ import { auth, db } from './firebase';
 import { Mic, MicOff, LogIn, LogOut, BookOpen, Sparkles, Loader2, CheckCircle2, Users, GraduationCap, Briefcase, UserCircle, Sun, Moon } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { BrowserRouter, Routes, Route, useNavigate, Link } from 'react-router-dom';
+import UserProfilePage from './UserProfilePage';
 
 // --- Audio Helpers ---
 const SAMPLE_RATE = 16000;
@@ -125,6 +126,8 @@ function VoiceAgent() {
   const isPlayingRef = useRef(false);
   // Turn-taking: true while the AI is streaming audio — mic is muted during this window
   const isAISpeakingRef = useRef(false);
+  const pauseMicRef = useRef<(() => void) | null>(null);
+  const resumeMicRef = useRef<(() => void) | null>(null);
 
   const [studyPlanPreview, setStudyPlanPreview] = useState<{ plan_title: string, action_items: string[] } | null>(null);
   const [isSavingPlan, setIsSavingPlan] = useState(false);
@@ -284,10 +287,9 @@ function VoiceAgent() {
       }
 
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      // In production, we must use the service domain name exactly, not window.location.host
-      // which might include non-standard ports or subdomains during proxying.
-      const host = window.location.host;
-      const wsUrl = `${protocol}//${host}/api/voice-agent?token=${token}`;
+      // Use host (hostname + port) so dev URLs like http://localhost:8080 upgrade to
+      // ws://localhost:8080 — hostname alone targets the wrong port and the socket fails.
+      const wsUrl = `${protocol}//${window.location.host}/api/voice-agent?token=${encodeURIComponent(token)}`;
       
       console.log(`[Flow Check] Connecting to WebSocket: ${wsUrl}`);
       const ws = new WebSocket(wsUrl);
@@ -337,12 +339,12 @@ function VoiceAgent() {
         } else if (msg.type === 'speech_start') {
           // AI has started speaking — physically disconnect processor + set flag
           isAISpeakingRef.current = true;
-          pauseMic();
+          pauseMicRef.current?.();
           console.log('%c[Turn] 🛑 AI speaking → mic disconnected', 'color:orange;font-weight:bold');
         } else if (msg.type === 'speech_end') {
           // AI finished speaking — reconnect processor + clear flag
           isAISpeakingRef.current = false;
-          resumeMic();
+          resumeMicRef.current?.();
           console.log('%c[Turn] 🎤 AI done → mic reconnected', 'color:green;font-weight:bold');
         } else if (msg.type === 'transcript') {
           console.log(`[Phase3 Transcript] ${msg.role}: "${msg.text?.substring(0, 80)}"`);
@@ -484,6 +486,9 @@ function VoiceAgent() {
         try { processor.connect(currentContext.destination); } catch (_) {}
       };
 
+      pauseMicRef.current = pauseMic;
+      resumeMicRef.current = resumeMic;
+
       source.connect(processor);
       processor.connect(currentContext.destination);
       setIsRecording(true);
@@ -502,6 +507,8 @@ function VoiceAgent() {
       processorRef.current.disconnect();
       processorRef.current = null;
     }
+    pauseMicRef.current = null;
+    resumeMicRef.current = null;
     if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
       try {
         await audioContextRef.current.close();
@@ -538,10 +545,18 @@ function VoiceAgent() {
 
           {user ? (
             <div className="flex items-center gap-4">
-              <div className="hidden sm:flex flex-col items-end">
-                <span className="text-sm font-medium">{user.displayName}</span>
-                <span className="text-[10px] text-[var(--text-secondary)]">Student ID: {user.uid.slice(0, 8)}</span>
-              </div>
+              <Link
+                to="/profile"
+                className="flex flex-col items-end max-w-[11rem] sm:max-w-none min-w-0 group rounded-lg px-1 -mr-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-primary)]"
+                title="View profile"
+              >
+                <span className="text-sm font-medium truncate text-right group-hover:text-blue-600 transition-colors">
+                  {user.displayName || user.email || 'Profile'}
+                </span>
+                <span className="text-[10px] text-[var(--text-secondary)] hidden sm:block">
+                  Student ID: {user.uid.slice(0, 8)}
+                </span>
+              </Link>
               <button 
                 onClick={handleLogout}
                 className="p-2 hover:bg-[var(--bg-secondary)] rounded-full transition-colors group"
@@ -1053,6 +1068,7 @@ export default function App() {
         <Route path="/adult-learners" element={<AdultLearnerPage />} />
         <Route path="/employers" element={<EmployerPage />} />
         <Route path="/counselors" element={<CounselorPage />} />
+        <Route path="/profile" element={<UserProfilePage />} />
       </Routes>
     </BrowserRouter>
   );
