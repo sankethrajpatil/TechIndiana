@@ -6,6 +6,7 @@ import { Mic, MicOff, LogIn, LogOut, BookOpen, Sparkles, Loader2, CheckCircle2, 
 import { motion, AnimatePresence } from 'motion/react';
 import { BrowserRouter, Routes, Route, useNavigate, Link } from 'react-router-dom';
 import UserProfilePage from './UserProfilePage';
+import CounselorDashboard from './CounselorDashboard';
 
 // --- Audio Helpers ---
 const SAMPLE_RATE = 16000;
@@ -88,6 +89,7 @@ const CounselorPage = () => (
     <BookOpen className="w-20 h-20 text-blue-600" />
     <h2 className="text-5xl font-black tracking-tighter uppercase drop-shadow-sm">Counselor Toolkit</h2>
     <p className="text-[var(--text-secondary)] max-w-xl text-lg">Guide students toward high-demand tech careers.</p>
+    <Link to="/counselors/dashboard" className="px-6 py-3 bg-[#4A4F76] text-white font-bold rounded-lg hover:bg-[#3a3f66] transition-all">Open Dashboard</Link>
     <Link to="/" className="text-blue-600 hover:text-blue-700 font-bold underline-offset-4 hover:underline transition-all">Back to Advisor</Link>
   </div>
 );
@@ -1070,6 +1072,7 @@ export default function App() {
         <Route path="/adult-learners" element={<AdultLearnerPage />} />
         <Route path="/employers" element={<EmployerPage />} />
         <Route path="/counselors" element={<CounselorPage />} />
+        <Route path="/counselors/dashboard" element={<CounselorDashboard />} />
         <Route path="/profile" element={<UserProfilePage />} />
       </Routes>
     </BrowserRouter>

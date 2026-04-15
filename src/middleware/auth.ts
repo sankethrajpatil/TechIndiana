@@ -1,11 +1,13 @@
 import { Request, Response, NextFunction } from 'express';
 import admin from 'firebase-admin';
+import UserProfile from '../models/UserProfile.js';
 
-// Extend Express Request to include user UID
+// Extend Express Request to include user UID and role
 declare global {
   namespace Express {
     interface Request {
       uid?: string;
+      userRole?: string;
     }
   }
 }
@@ -36,6 +38,26 @@ export const firebaseAuthMiddleware = async (req: Request, res: Response, next: 
     console.error('Error verifying Firebase ID token:', error);
     res.status(401).json({ error: 'Unauthorized: Invalid token' });
   }
+};
+
+export const requireRole = (...roles: string[]) => {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    if (!req.uid) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    try {
+      const profile = await UserProfile.findOne({ firebaseUid: req.uid });
+      const userRole = (profile as any)?.role || 'student';
+      req.userRole = userRole;
+      if (!roles.includes(userRole)) {
+        return res.status(403).json({ error: 'Forbidden: insufficient permissions' });
+      }
+      next();
+    } catch (error) {
+      console.error('Error checking user role:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  };
 };
 
 // Helper for WebSocket authentication

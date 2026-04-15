@@ -11,7 +11,7 @@ console.log('DEBUG: Node.js version:', process.version);
 console.log('DEBUG: Initializing GoogleGenAI...');
 import { createServer as createViteServer } from 'vite';
 import UserProfile from './src/models/UserProfile';
-import { firebaseAuthMiddleware, verifyWebSocketToken } from './src/middleware/auth';
+import { firebaseAuthMiddleware, verifyWebSocketToken, requireRole } from './src/middleware/auth';
 import sessionRouter from './server/routes/session';
 import { createCalendarEvent } from './server/services/calendarService';
 import { sendResourceEmail } from './server/services/emailService';
@@ -248,6 +248,120 @@ async function startServer() {
       res.json({ success: true, profile });
     } catch (error) {
       console.error('Error fetching profile:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // --- REST API: Counselor Endpoints ---
+  // Get all students (counselor/admin only)
+  app.get('/api/counselor/students', firebaseAuthMiddleware, requireRole('counselor', 'admin'), async (req, res) => {
+    if (!isMongoConnected) {
+      return res.status(503).json({ error: 'Database service unavailable.' });
+    }
+    try {
+      const students = await UserProfile.find({ role: { $in: ['student', null, undefined] } })
+        .select('firebaseUid email name background expectations study_plan assigned_counselor role createdAt updatedAt')
+        .sort({ updatedAt: -1 });
+      // Include profiles with no role field (legacy students)
+      const allStudents = students.filter(s => !s.role || s.role === 'student');
+      res.json({ success: true, students: allStudents });
+    } catch (error) {
+      console.error('Error fetching students:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // Get a specific student's full profile (counselor/admin only)
+  app.get('/api/counselor/students/:firebaseUid', firebaseAuthMiddleware, requireRole('counselor', 'admin'), async (req, res) => {
+    if (!isMongoConnected) {
+      return res.status(503).json({ error: 'Database service unavailable.' });
+    }
+    try {
+      const student = await UserProfile.findOne({ firebaseUid: req.params.firebaseUid });
+      if (!student) {
+        return res.status(404).json({ error: 'Student not found' });
+      }
+      res.json({ success: true, student });
+    } catch (error) {
+      console.error('Error fetching student:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // Assign a counselor to a student (counselor/admin only)
+  app.put('/api/counselor/assign', firebaseAuthMiddleware, requireRole('counselor', 'admin'), async (req, res) => {
+    if (!isMongoConnected) {
+      return res.status(503).json({ error: 'Database service unavailable.' });
+    }
+    const { studentUid } = req.body;
+    if (!studentUid) {
+      return res.status(400).json({ error: 'studentUid is required' });
+    }
+    try {
+      const student = await UserProfile.findOneAndUpdate(
+        { firebaseUid: studentUid },
+        { assigned_counselor: req.uid },
+        { new: true }
+      );
+      if (!student) {
+        return res.status(404).json({ error: 'Student not found' });
+      }
+      res.json({ success: true, student });
+    } catch (error) {
+      console.error('Error assigning counselor:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // Unassign a counselor from a student (counselor/admin only)
+  app.put('/api/counselor/unassign', firebaseAuthMiddleware, requireRole('counselor', 'admin'), async (req, res) => {
+    if (!isMongoConnected) {
+      return res.status(503).json({ error: 'Database service unavailable.' });
+    }
+    const { studentUid } = req.body;
+    if (!studentUid) {
+      return res.status(400).json({ error: 'studentUid is required' });
+    }
+    try {
+      const student = await UserProfile.findOneAndUpdate(
+        { firebaseUid: studentUid },
+        { $unset: { assigned_counselor: '' } },
+        { new: true }
+      );
+      if (!student) {
+        return res.status(404).json({ error: 'Student not found' });
+      }
+      res.json({ success: true, student });
+    } catch (error) {
+      console.error('Error unassigning counselor:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // Update a user's role (admin only)
+  app.put('/api/admin/role', firebaseAuthMiddleware, requireRole('admin'), async (req, res) => {
+    if (!isMongoConnected) {
+      return res.status(503).json({ error: 'Database service unavailable.' });
+    }
+    const { targetUid, role } = req.body;
+    if (!targetUid || !role) {
+      return res.status(400).json({ error: 'targetUid and role are required' });
+    }
+    if (!['student', 'counselor', 'admin'].includes(role)) {
+      return res.status(400).json({ error: 'Invalid role. Must be student, counselor, or admin.' });
+    }
+    try {
+      const profile = await UserProfile.findOneAndUpdate(
+        { firebaseUid: targetUid },
+        { role },
+        { new: true }
+      );
+      if (!profile) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+      res.json({ success: true, profile });
+    } catch (error) {
+      console.error('Error updating role:', error);
       res.status(500).json({ error: 'Internal server error' });
     }
   });
