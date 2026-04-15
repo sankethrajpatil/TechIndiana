@@ -10,12 +10,10 @@ const router = express.Router();
 // NOTE: For production, use environment variables for credentials.
 // For testing, you can use Ethereal or a Gmail App Password.
 const transporter = nodemailer.createTransport({
-  host: 'smtp.gmail.com',
-  port: 465,
-  secure: true, // Use SSL
+  service: 'gmail',
   auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
+    user: "sanketh.r.p@campusuvce.in",
+    pass: "bqoa bvut gtli cbxu",
   },
 });
 

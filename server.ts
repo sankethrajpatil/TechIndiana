@@ -15,6 +15,7 @@ import { firebaseAuthMiddleware, verifyWebSocketToken } from './src/middleware/a
 import sessionRouter from './server/routes/session';
 import { createCalendarEvent } from './server/services/calendarService';
 import { sendResourceEmail } from './server/services/emailService';
+import { fetchVideosForSkills } from './server/services/youtubeService';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -245,20 +246,32 @@ async function startServer() {
     }
   };
 
-  const presentStudyPlanTool: FunctionDeclaration = {
-    name: "present_study_plan",
-    description: "Presents a generated study plan to the user on their screen.",
+  const generateYoutubeStudyPlanTool: FunctionDeclaration = {
+    name: "generate_youtube_study_plan",
+    description: "Generates a dated study plan timeline and fetches relevant YouTube tutorial videos for missing skills.",
     parameters: {
       type: Type.OBJECT,
       properties: {
-        plan_title: { type: Type.STRING, description: "The title of the study plan." },
-        action_items: { 
+        plan_title: { type: Type.STRING, description: "The overarching title of the study plan." },
+        missing_skills: { 
           type: Type.ARRAY, 
           items: { type: Type.STRING },
-          description: "A list of specific steps or topics to study." 
+          description: "A list of 2-3 specific technical skills the user currently lacks for their goal." 
+        },
+        milestones: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              date: { type: Type.STRING, description: "The milestone date starting from today April 10, 2026 (Format: Month Day, Year)." },
+              topic: { type: Type.STRING, description: "Short heading for this milestone." },
+              action_items: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Specific steps to take." }
+            },
+            required: ["date", "topic", "action_items"]
+          }
         }
       },
-      required: ["plan_title", "action_items"]
+      required: ["plan_title", "missing_skills", "milestones"]
     }
   };
 
@@ -445,7 +458,9 @@ async function startServer() {
         console.log(`[Phase3 Gemini] 🧠 Injecting ${profile.saved_memories.length} past memories for ${uid}.`);
       }
 
-      const systemInstruction = `You are the official voice-based academic advisor for TechIndiana. Your tone is upbeat, technical, encouraging, and welcoming. You are currently speaking with ${userName}. Address them by name and begin providing personalized career guidance based on their profile and past interactions. Do not ask for their name as you already have it.${memoryInjection}`;
+      const systemInstruction = `You are the official voice-based academic advisor for TechIndiana. Your tone is upbeat, technical, encouraging, and welcoming. You are currently speaking with ${userName}. Address them by name. 
+
+When a user shares their background, strictly analyze their current skills vs. their career goal and verbally identify the exact gap. When they ask for a course of action, invoke the 'generate_youtube_study_plan' tool. Include specific dates for each milestone, starting from today: April 10, 2026. Do not ask for their name as you already have it.${memoryInjection}`;
       
       try {
         console.log(`[Gemini Handshake] Connecting with model: gemini-2.5-flash-native-audio-preview-12-2025 for UID: ${uid}`);
@@ -467,7 +482,7 @@ async function startServer() {
               {
                 functionDeclarations: [
                   saveUserProfileTool,
-                  presentStudyPlanTool,
+                  generateYoutubeStudyPlanTool,
                   saveConversationSummaryTool,
                   routeUserToPersonaPageTool,
                   schedulePartnershipCallTool,
@@ -752,6 +767,36 @@ async function startServer() {
                   }]
                 });
                 console.log(`[Phase4 TOOL CALL] ✅ sendToolResponse sent for "show_pathway_comparison" id="${call.id}". AI should now RESUME.`);
+              } else if (call.name === "generate_youtube_study_plan") {
+                console.log(`[Phase4 TOOL CALL] generate_youtube_study_plan for ${uid}`, call.args);
+                const { plan_title, missing_skills, milestones } = call.args;
+                
+                try {
+                  const videoData = await fetchVideosForSkills(missing_skills);
+                  console.log(`[Phase4 TOOL CALL] 🎥 Fetched ${videoData.length} YouTube videos for missing skills.`);
+                  
+                  ws.send(JSON.stringify({ 
+                    type: 'study_plan_ready', 
+                    plan: { plan_title, missing_skills, milestones, videos: videoData } 
+                  }));
+
+                  geminiSession.sendToolResponse({
+                    functionResponses: [{
+                      name: "generate_youtube_study_plan",
+                      response: { success: true, message: `A study plan with ${videoData.length} YouTube tutorials has been generated and displayed.` },
+                      id: call.id
+                    }]
+                  });
+                } catch (err) {
+                  console.error('Error fetching YouTube videos:', err);
+                  geminiSession.sendToolResponse({
+                    functionResponses: [{
+                      name: "generate_youtube_study_plan",
+                      response: { success: false, error: "Failed to fetch supporting YouTube videos." },
+                      id: call.id
+                    }]
+                  });
+                }
               } else if (call.name === "extract_and_save_memory") {
                 console.log(`[Phase4 TOOL CALL] extract_and_save_memory for ${uid}`, call.args);
                 const memoryFact = call.args.memory_fact;
