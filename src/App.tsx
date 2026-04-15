@@ -6,6 +6,7 @@ import { auth, db } from './firebase';
 import { Mic, MicOff, LogIn, LogOut, BookOpen, Sparkles, Loader2, CheckCircle2, Users, GraduationCap, Briefcase, UserCircle, Sun, Moon } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { BrowserRouter, Routes, Route, useNavigate, Link } from 'react-router-dom';
+import UserProfilePage from './UserProfilePage';
 
 // --- Audio Helpers ---
 const SAMPLE_RATE = 16000;
@@ -125,6 +126,8 @@ function VoiceAgent() {
   const isPlayingRef = useRef(false);
   // Turn-taking: true while the AI is streaming audio — mic is muted during this window
   const isAISpeakingRef = useRef(false);
+  const pauseMicRef = useRef<(() => void) | null>(null);
+  const resumeMicRef = useRef<(() => void) | null>(null);
 
   const [studyPlanPreview, setStudyPlanPreview] = useState<{ plan_title: string, action_items: string[] } | null>(null);
   const [isSavingPlan, setIsSavingPlan] = useState(false);
@@ -284,10 +287,9 @@ function VoiceAgent() {
       }
 
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      // In production, we must use the service domain name exactly, not window.location.host
-      // which might include non-standard ports or subdomains during proxying.
-      const host = window.location.host;
-      const wsUrl = `${protocol}//${host}/api/voice-agent?token=${token}`;
+      // Use host (hostname + port) so dev URLs like http://localhost:8080 upgrade to
+      // ws://localhost:8080 — hostname alone targets the wrong port and the socket fails.
+      const wsUrl = `${protocol}//${window.location.host}/api/voice-agent?token=${encodeURIComponent(token)}`;
       
       console.log(`[Flow Check] Connecting to WebSocket: ${wsUrl}`);
       const ws = new WebSocket(wsUrl);
@@ -337,12 +339,12 @@ function VoiceAgent() {
         } else if (msg.type === 'speech_start') {
           // AI has started speaking — physically disconnect processor + set flag
           isAISpeakingRef.current = true;
-          pauseMic();
+          pauseMicRef.current?.();
           console.log('%c[Turn] 🛑 AI speaking → mic disconnected', 'color:orange;font-weight:bold');
         } else if (msg.type === 'speech_end') {
           // AI finished speaking — reconnect processor + clear flag
           isAISpeakingRef.current = false;
-          resumeMic();
+          resumeMicRef.current?.();
           console.log('%c[Turn] 🎤 AI done → mic reconnected', 'color:green;font-weight:bold');
         } else if (msg.type === 'transcript') {
           console.log(`[Phase3 Transcript] ${msg.role}: "${msg.text?.substring(0, 80)}"`);
@@ -353,8 +355,8 @@ function VoiceAgent() {
         } else if (msg.type === 'error') {
           console.error(`[Phase3 Error] Server reported error: ${msg.message}`);
           setError(msg.message);
-        } else if (msg.type === 'study_plan_preview') {
-          console.log('[Phase3] Study plan preview received from server.');
+        } else if (msg.type === 'study_plan_ready') {
+          console.log('[Phase3] Enhanced study plan received from server.');
           setStudyPlanPreview(msg.plan);
         } else if (msg.type === 'ui_redirect') {
           console.log(`[Phase3] UI redirect triggered to: ${msg.route}`);
@@ -484,6 +486,9 @@ function VoiceAgent() {
         try { processor.connect(currentContext.destination); } catch (_) {}
       };
 
+      pauseMicRef.current = pauseMic;
+      resumeMicRef.current = resumeMic;
+
       source.connect(processor);
       processor.connect(currentContext.destination);
       setIsRecording(true);
@@ -502,6 +507,8 @@ function VoiceAgent() {
       processorRef.current.disconnect();
       processorRef.current = null;
     }
+    pauseMicRef.current = null;
+    resumeMicRef.current = null;
     if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
       try {
         await audioContextRef.current.close();
@@ -538,10 +545,18 @@ function VoiceAgent() {
 
           {user ? (
             <div className="flex items-center gap-4">
-              <div className="hidden sm:flex flex-col items-end">
-                <span className="text-sm font-medium">{user.displayName}</span>
-                <span className="text-[10px] text-[var(--text-secondary)]">Student ID: {user.uid.slice(0, 8)}</span>
-              </div>
+              <Link
+                to="/profile"
+                className="flex flex-col items-end max-w-[11rem] sm:max-w-none min-w-0 group rounded-lg px-1 -mr-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-primary)]"
+                title="View profile"
+              >
+                <span className="text-sm font-medium truncate text-right group-hover:text-blue-600 transition-colors">
+                  {user.displayName || user.email || 'Profile'}
+                </span>
+                <span className="text-[10px] text-[var(--text-secondary)] hidden sm:block">
+                  Student ID: {user.uid.slice(0, 8)}
+                </span>
+              </Link>
               <button 
                 onClick={handleLogout}
                 className="p-2 hover:bg-[var(--bg-secondary)] rounded-full transition-colors group"
@@ -819,7 +834,7 @@ function VoiceAgent() {
                         <div className="bg-blue-600 p-2 rounded-xl">
                           <Sparkles className="w-6 h-6 text-white" />
                         </div>
-                        <h3 className="text-xl font-bold">New Plan Preview</h3>
+                        <h3 className="text-xl font-bold">Skill Gap Analysis</h3>
                       </div>
                       <button 
                         onClick={() => setStudyPlanPreview(null)}
@@ -829,16 +844,78 @@ function VoiceAgent() {
                       </button>
                     </div>
 
-                    <div className="space-y-4">
-                      <h4 className="text-2xl font-black tracking-tight">{studyPlanPreview.plan_title}</h4>
-                      <ul className="space-y-2">
-                        {studyPlanPreview.action_items.map((item, i) => (
-                          <li key={i} className="flex gap-2 text-sm">
-                            <span className="text-blue-600 font-bold">•</span>
-                            {item}
-                          </li>
-                        ))}
-                      </ul>
+                    <div className="space-y-6">
+                      <div>
+                        <h4 className="text-2xl font-black tracking-tight">{studyPlanPreview.plan_title}</h4>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {studyPlanPreview.missing_skills?.map((skill, i) => (
+                            <span key={i} className="text-[10px] font-bold uppercase tracking-widest bg-red-500/10 text-red-500 px-2 py-1 rounded-md border border-red-500/20">
+                              Gap: {skill}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="space-y-4">
+                        <h5 className="text-xs font-bold uppercase tracking-widest text-[var(--text-secondary)]">Your Timeline</h5>
+                        <div className="space-y-4">
+                          {studyPlanPreview.milestones?.map((m, i) => (
+                            <div key={i} className="relative pl-6 border-l-2 border-blue-600/30 py-1">
+                                <div className="absolute left-[-9px] top-2 w-4 h-4 rounded-full bg-blue-600 border-4 border-slate-900"></div>
+                                <p className="text-[10px] font-bold text-blue-500 uppercase">{m.date}</p>
+                                <h6 className="font-bold text-sm">{m.topic}</h6>
+                                <ul className="mt-1 space-y-1">
+                                  {m.action_items.map((action, j) => (
+                                    <li key={j} className="text-xs text-[var(--text-secondary)] flex gap-2">
+                                      <span className="text-blue-500">•</span> {action}
+                                    </li>
+                                  ))}
+                                </ul>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {studyPlanPreview.videos && studyPlanPreview.videos.length > 0 && (
+                        <div className="space-y-4 pt-4 border-t border-[var(--border-color)]">
+                          <h5 className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-[var(--text-secondary)]">
+                            <span className="bg-red-600 w-2 h-2 rounded-full animate-pulse"></span>
+                            Recommended Tutorials
+                          </h5>
+                          <div className="grid grid-cols-1 gap-3">
+                            {studyPlanPreview.videos.map((video, idx) => (
+                              <a 
+                                key={idx} 
+                                href={video.url} 
+                                target="_blank" 
+                                rel="noopener noreferrer"
+                                className="group flex items-center gap-4 p-3 bg-white/5 rounded-2xl hover:bg-white/10 transition-all border border-white/10"
+                              >
+                                <div className="relative w-24 h-16 flex-shrink-0">
+                                  <img 
+                                    src={video.thumbnail} 
+                                    alt={video.title} 
+                                    className="w-full h-full object-cover rounded-lg"
+                                  />
+                                  <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg">
+                                    <div className="w-8 h-8 bg-red-600 rounded-full flex items-center justify-center">
+                                      <div className="w-0 h-0 border-t-[5px] border-t-transparent border-l-[8px] border-l-white border-b-[5px] border-b-transparent ml-1"></div>
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="flex-1 overflow-hidden">
+                                  <p className="text-xs font-bold line-clamp-2 leading-tight group-hover:text-blue-400 transition-colors">
+                                    {video.title}
+                                  </p>
+                                  <p className="text-[10px] text-[var(--text-secondary)] mt-1 truncate">
+                                    {video.channel}
+                                  </p>
+                                </div>
+                              </a>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     <button
@@ -869,13 +946,45 @@ function VoiceAgent() {
                           try {
                             const parsed = JSON.parse(studyPlan);
                             return (
-                              <div className="space-y-4">
-                                <h4 className="text-lg font-bold">{parsed.plan_title}</h4>
-                                <ul className="space-y-2">
-                                  {parsed.action_items.map((item: string, i: number) => (
-                                    <li key={i} className="flex gap-2">• {item}</li>
+                              <div className="space-y-6">
+                                <div>
+                                  <h4 className="text-lg font-bold">{parsed.plan_title}</h4>
+                                  <div className="mt-2 flex flex-wrap gap-2">
+                                    {parsed.missing_skills?.map((skill: string, i: number) => (
+                                      <span key={i} className="text-[10px] font-bold uppercase tracking-widest bg-white/20 px-2 py-0.5 rounded border border-white/30">
+                                        Goal: {skill}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                                
+                                <div className="space-y-4">
+                                  {parsed.milestones?.map((m: any, i: number) => (
+                                    <div key={i} className="relative pl-6 border-l-2 border-white/20 py-1">
+                                        <div className="absolute left-[-7px] top-2 w-3 h-3 rounded-full bg-white"></div>
+                                        <p className="text-[10px] font-bold text-white/70 uppercase">{m.date}</p>
+                                        <h6 className="font-bold text-sm">{m.topic}</h6>
+                                        <ul className="mt-1 space-y-1">
+                                          {m.action_items.map((action: string, j: number) => (
+                                            <li key={j} className="text-xs text-white/80 flex gap-2">
+                                              <span>•</span> {action}
+                                            </li>
+                                          ))}
+                                        </ul>
+                                    </div>
                                   ))}
-                                </ul>
+                                </div>
+
+                                {parsed.videos && parsed.videos.length > 0 && (
+                                  <div className="pt-4 border-t border-white/10 space-y-3">
+                                    <p className="text-[10px] font-bold uppercase tracking-widest text-white/60">Saved Tutorials</p>
+                                    <div className="grid grid-cols-1 gap-2">
+                                      {parsed.videos.map((vid: any, idx: number) => (
+                                        <a key={idx} href={vid.url} target="_blank" className="text-xs font-bold hover:underline block truncate">• {vid.title}</a>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
                               </div>
                             );
                           } catch (e) {
@@ -959,6 +1068,7 @@ export default function App() {
         <Route path="/adult-learners" element={<AdultLearnerPage />} />
         <Route path="/employers" element={<EmployerPage />} />
         <Route path="/counselors" element={<CounselorPage />} />
+        <Route path="/profile" element={<UserProfilePage />} />
       </Routes>
     </BrowserRouter>
   );

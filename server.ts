@@ -15,9 +15,12 @@ import { firebaseAuthMiddleware, verifyWebSocketToken } from './src/middleware/a
 import sessionRouter from './server/routes/session';
 import { createCalendarEvent } from './server/services/calendarService';
 import { sendResourceEmail } from './server/services/emailService';
+import { fetchVideosForSkills } from './server/services/youtubeService';
 import dotenv from 'dotenv';
 
 dotenv.config();
+// Also load src/.env (common when env files live next to frontend); does not override existing vars.
+dotenv.config({ path: path.join(process.cwd(), 'src', '.env') });
 
 // Global error handling to prevent 1005 WebSocket closures from silent crashes
 process.on("uncaughtException", (err) => {
@@ -245,20 +248,32 @@ async function startServer() {
     }
   };
 
-  const presentStudyPlanTool: FunctionDeclaration = {
-    name: "present_study_plan",
-    description: "Presents a generated study plan to the user on their screen.",
+  const generateYoutubeStudyPlanTool: FunctionDeclaration = {
+    name: "generate_youtube_study_plan",
+    description: "Generates a dated study plan timeline and fetches relevant YouTube tutorial videos for missing skills.",
     parameters: {
       type: Type.OBJECT,
       properties: {
-        plan_title: { type: Type.STRING, description: "The title of the study plan." },
-        action_items: { 
+        plan_title: { type: Type.STRING, description: "The overarching title of the study plan." },
+        missing_skills: { 
           type: Type.ARRAY, 
           items: { type: Type.STRING },
-          description: "A list of specific steps or topics to study." 
+          description: "A list of 2-3 specific technical skills the user currently lacks for their goal." 
+        },
+        milestones: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              date: { type: Type.STRING, description: "The milestone date starting from today April 10, 2026 (Format: Month Day, Year)." },
+              topic: { type: Type.STRING, description: "Short heading for this milestone." },
+              action_items: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Specific steps to take." }
+            },
+            required: ["date", "topic", "action_items"]
+          }
         }
       },
-      required: ["plan_title", "action_items"]
+      required: ["plan_title", "missing_skills", "milestones"]
     }
   };
 
@@ -406,8 +421,23 @@ async function startServer() {
     let geminiSession: any = null;
     let geminiReady = false;
     let aiTurnActive = false;  // true while Gemini is streaming audio in the current turn
-    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-    console.log(`[Phase3 Init] GEMINI_API_KEY present: ${!!process.env.GEMINI_API_KEY} | Length: ${process.env.GEMINI_API_KEY?.length || 0}`);
+    const geminiApiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+    if (!geminiApiKey) {
+      console.error('[Phase3 Init] Missing GEMINI_API_KEY or GOOGLE_API_KEY (check project root .env or src/.env).');
+      if (ws.readyState === ws.OPEN) {
+        ws.send(
+          JSON.stringify({
+            type: 'error',
+            message:
+              'Advisor service is not configured: add GEMINI_API_KEY or GOOGLE_API_KEY to .env in the project root or src/.env, then restart the server.',
+          })
+        );
+      }
+      ws.close();
+      return;
+    }
+    const ai = new GoogleGenAI({ apiKey: geminiApiKey });
+    console.log(`[Phase3 Init] Gemini API key present: true | Length: ${geminiApiKey.length}`);
     console.log(`[Phase3 Init] FIREBASE_ADMIN initialized: ${admin.apps.length > 0}`);
     console.log(`[Phase3 Init] MongoDB connected: ${isMongoConnected}`);
 
@@ -445,7 +475,9 @@ async function startServer() {
         console.log(`[Phase3 Gemini] 🧠 Injecting ${profile.saved_memories.length} past memories for ${uid}.`);
       }
 
-      const systemInstruction = `You are the official voice-based academic advisor for TechIndiana. Your tone is upbeat, technical, encouraging, and welcoming. You are currently speaking with ${userName}. Address them by name and begin providing personalized career guidance based on their profile and past interactions. Do not ask for their name as you already have it.${memoryInjection}`;
+      const systemInstruction = `You are the official voice-based academic advisor for TechIndiana. Your tone is upbeat, technical, encouraging, and welcoming. You are currently speaking with ${userName}. Address them by name. 
+
+When a user shares their background, strictly analyze their current skills vs. their career goal and verbally identify the exact gap. When they ask for a course of action, invoke the 'generate_youtube_study_plan' tool. Include specific dates for each milestone, starting from today: April 10, 2026. Do not ask for their name as you already have it.${memoryInjection}`;
       
       try {
         console.log(`[Gemini Handshake] Connecting with model: gemini-2.5-flash-native-audio-preview-12-2025 for UID: ${uid}`);
@@ -467,7 +499,7 @@ async function startServer() {
               {
                 functionDeclarations: [
                   saveUserProfileTool,
-                  presentStudyPlanTool,
+                  generateYoutubeStudyPlanTool,
                   saveConversationSummaryTool,
                   routeUserToPersonaPageTool,
                   schedulePartnershipCallTool,
@@ -752,6 +784,36 @@ async function startServer() {
                   }]
                 });
                 console.log(`[Phase4 TOOL CALL] ✅ sendToolResponse sent for "show_pathway_comparison" id="${call.id}". AI should now RESUME.`);
+              } else if (call.name === "generate_youtube_study_plan") {
+                console.log(`[Phase4 TOOL CALL] generate_youtube_study_plan for ${uid}`, call.args);
+                const { plan_title, missing_skills, milestones } = call.args;
+                
+                try {
+                  const videoData = await fetchVideosForSkills(missing_skills);
+                  console.log(`[Phase4 TOOL CALL] 🎥 Fetched ${videoData.length} YouTube videos for missing skills.`);
+                  
+                  ws.send(JSON.stringify({ 
+                    type: 'study_plan_ready', 
+                    plan: { plan_title, missing_skills, milestones, videos: videoData } 
+                  }));
+
+                  geminiSession.sendToolResponse({
+                    functionResponses: [{
+                      name: "generate_youtube_study_plan",
+                      response: { success: true, message: `A study plan with ${videoData.length} YouTube tutorials has been generated and displayed.` },
+                      id: call.id
+                    }]
+                  });
+                } catch (err) {
+                  console.error('Error fetching YouTube videos:', err);
+                  geminiSession.sendToolResponse({
+                    functionResponses: [{
+                      name: "generate_youtube_study_plan",
+                      response: { success: false, error: "Failed to fetch supporting YouTube videos." },
+                      id: call.id
+                    }]
+                  });
+                }
               } else if (call.name === "extract_and_save_memory") {
                 console.log(`[Phase4 TOOL CALL] extract_and_save_memory for ${uid}`, call.args);
                 const memoryFact = call.args.memory_fact;
@@ -846,51 +908,10 @@ async function startServer() {
     }
   });
 
-  // Upgrade HTTP to WebSocket
-  server.on('upgrade', async (request, socket, head) => {
-    const url = new URL(request.url!, `http://${request.headers.host}`);
-    if (url.pathname === '/api/voice-agent') {
-      const token = url.searchParams.get('token');
-      console.log('WebSocket upgrade request token:', token ? `${token.substring(0, 60)}${token.length > 60 ? '...' : ''}` : '<<none>>');
-
-      if (!token) {
-        socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
-        socket.destroy();
-        return;
-      }
-
-      // Development shortcut: accept dev:<uid> tokens locally without calling Firebase
-      let uid: string | null = null;
-      try {
-        if (process.env.NODE_ENV !== 'production' && token.startsWith('dev:')) {
-          uid = token.split('dev:')[1] || null;
-          console.log('Using dev token for WebSocket upgrade. UID:', uid ? uid.substring(0, 12) : 'null');
-        } else {
-          uid = await verifyWebSocketToken(token);
-        }
-      } catch (err) {
-        console.error('Error while verifying WebSocket token during upgrade:', err);
-        uid = null;
-      }
-
-      if (!uid) {
-        socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
-        socket.destroy();
-        return;
-      }
-
-      wss.handleUpgrade(request, socket, head, (ws) => {
-        wss.emit('connection', ws, request, uid);
-      });
-    } else {
-      socket.destroy();
-    }
-  });
-
-  // --- Vite Middleware for Frontend ---
+  // --- Vite / static before voice upgrade so HMR can attach to the same http.Server ---
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: { middlewareMode: true, hmr: { server } },
       appType: 'spa',
     });
     app.use(vite.middlewares);
@@ -901,6 +922,46 @@ async function startServer() {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
+
+  // Upgrade HTTP to WebSocket — only handle voice agent; leave other paths (e.g. Vite HMR) alone.
+  server.on('upgrade', async (request, socket, head) => {
+    const url = new URL(request.url!, `http://${request.headers.host}`);
+    if (url.pathname !== '/api/voice-agent') {
+      return;
+    }
+
+    const token = url.searchParams.get('token');
+    console.log('WebSocket upgrade request token:', token ? `${token.substring(0, 60)}${token.length > 60 ? '...' : ''}` : '<<none>>');
+
+    if (!token) {
+      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+
+    let uid: string | null = null;
+    try {
+      if (process.env.NODE_ENV !== 'production' && token.startsWith('dev:')) {
+        uid = token.split('dev:')[1] || null;
+        console.log('Using dev token for WebSocket upgrade. UID:', uid ? uid.substring(0, 12) : 'null');
+      } else {
+        uid = await verifyWebSocketToken(token);
+      }
+    } catch (err) {
+      console.error('Error while verifying WebSocket token during upgrade:', err);
+      uid = null;
+    }
+
+    if (!uid) {
+      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+
+    wss.handleUpgrade(request, socket, head, (ws) => {
+      wss.emit('connection', ws, request, uid);
+    });
+  });
 
   server.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running and listening on 0.0.0.0:${PORT}`);
