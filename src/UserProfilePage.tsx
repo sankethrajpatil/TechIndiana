@@ -1,7 +1,6 @@
 import { useState, useEffect, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
 import {
   BookOpen,
   Moon,
@@ -13,7 +12,7 @@ import {
   Calendar,
   Sparkles,
 } from 'lucide-react';
-import { auth, db } from './firebase';
+import { auth } from './firebase';
 
 function formatFirebaseDate(value: string | undefined | null): string {
   if (!value) return '—';
@@ -25,7 +24,7 @@ export default function UserProfilePage() {
   const navigate = useNavigate();
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const [firestoreExtras, setFirestoreExtras] = useState<Record<string, unknown> | null>(null);
+  const [mongoProfile, setMongoProfile] = useState<Record<string, unknown> | null>(null);
   const [theme, setTheme] = useState(localStorage.getItem('theme') || 'light');
 
   useEffect(() => {
@@ -44,13 +43,21 @@ export default function UserProfilePage() {
       setUser(u);
       if (u) {
         try {
-          const snap = await getDoc(doc(db, 'users', u.uid));
-          setFirestoreExtras(snap.exists() ? snap.data() : null);
+          const token = await u.getIdToken();
+          const res = await fetch('/api/profile', {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (res.ok) {
+            const data = await res.json();
+            setMongoProfile(data.profile);
+          } else {
+            setMongoProfile(null);
+          }
         } catch {
-          setFirestoreExtras(null);
+          setMongoProfile(null);
         }
       } else {
-        setFirestoreExtras(null);
+        setMongoProfile(null);
       }
       setLoading(false);
     });
@@ -85,7 +92,7 @@ export default function UserProfilePage() {
       ? 'Google'
       : user.providerData[0]?.providerId ?? '—';
 
-  const studyPlanRaw = firestoreExtras?.study_plan;
+  const studyPlanRaw = mongoProfile?.study_plan;
   let studyPlanSummary: string | null = null;
   if (typeof studyPlanRaw === 'string' && studyPlanRaw.trim()) {
     if (studyPlanRaw.trim().startsWith('{')) {

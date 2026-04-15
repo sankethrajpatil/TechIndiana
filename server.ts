@@ -233,6 +233,25 @@ async function startServer() {
     }
   });
 
+  app.get('/api/profile', firebaseAuthMiddleware, async (req, res) => {
+    if (!isMongoConnected) {
+      return res.status(503).json({ error: 'Database service unavailable.' });
+    }
+
+    const firebaseUid = req.uid;
+
+    try {
+      const profile = await UserProfile.findOne({ firebaseUid });
+      if (!profile) {
+        return res.json({ success: true, profile: null });
+      }
+      res.json({ success: true, profile });
+    } catch (error) {
+      console.error('Error fetching profile:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
   // --- WebSocket: Voice Agent ---
   const saveUserProfileTool: FunctionDeclaration = {
     name: "save_user_profile",
@@ -792,9 +811,25 @@ When a user shares their background, strictly analyze their current skills vs. t
                   const videoData = await fetchVideosForSkills(missing_skills);
                   console.log(`[Phase4 TOOL CALL] 🎥 Fetched ${videoData.length} YouTube videos for missing skills.`);
                   
+                  const planPayload = { plan_title, missing_skills, milestones, videos: videoData };
+
+                  // Auto-save study plan to MongoDB
+                  if (isMongoConnected) {
+                    try {
+                      await UserProfile.findOneAndUpdate(
+                        { firebaseUid: uid },
+                        { study_plan: JSON.stringify(planPayload) },
+                        { new: true, upsert: true }
+                      );
+                      console.log(`[Phase4 TOOL CALL] 💾 Study plan auto-saved to MongoDB for ${uid}.`);
+                    } catch (dbErr) {
+                      console.error(`[Phase4 TOOL CALL] Failed to auto-save study plan:`, dbErr);
+                    }
+                  }
+
                   ws.send(JSON.stringify({ 
                     type: 'study_plan_ready', 
-                    plan: { plan_title, missing_skills, milestones, videos: videoData } 
+                    plan: planPayload
                   }));
 
                   geminiSession.sendToolResponse({

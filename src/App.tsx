@@ -1,8 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { GoogleGenAI, Modality, Type, FunctionDeclaration } from "@google/genai";
 import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User } from 'firebase/auth';
-import { doc, setDoc, getDoc } from 'firebase/firestore';
-import { auth, db } from './firebase';
+import { auth } from './firebase';
 import { Mic, MicOff, LogIn, LogOut, BookOpen, Sparkles, Loader2, CheckCircle2, Users, GraduationCap, Briefcase, UserCircle, Sun, Moon } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { BrowserRouter, Routes, Route, useNavigate, Link } from 'react-router-dom';
@@ -138,14 +137,16 @@ function VoiceAgent() {
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
       setUser(u);
       if (u) {
-        // Fetch existing profile to see if there's a study plan
+        // Fetch study plan from MongoDB via API
         try {
-          const docRef = doc(db, "users", u.uid);
-          const docSnap = await getDoc(docRef);
-          if (docSnap.exists()) {
-            const data = docSnap.data();
-            if (data.study_plan) {
-              setStudyPlan(data.study_plan);
+          const token = await u.getIdToken();
+          const res = await fetch('/api/profile', {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.profile?.study_plan) {
+              setStudyPlan(data.profile.study_plan);
             }
           }
         } catch (err) {
@@ -358,6 +359,7 @@ function VoiceAgent() {
         } else if (msg.type === 'study_plan_ready') {
           console.log('[Phase3] Enhanced study plan received from server.');
           setStudyPlanPreview(msg.plan);
+          setStudyPlan(JSON.stringify(msg.plan));
         } else if (msg.type === 'ui_redirect') {
           console.log(`[Phase3] UI redirect triggered to: ${msg.route}`);
           navigate(msg.route);
