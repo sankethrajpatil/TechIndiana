@@ -15,6 +15,7 @@ export interface IUserProfile extends Document {
   study_plan?: string;
   conversation_summary?: string;
   conversation_history?: IMessage[];
+  saved_memories?: string[];
 }
 
 const UserProfileSchema: Schema = new Schema({
@@ -30,6 +31,7 @@ const UserProfileSchema: Schema = new Schema({
     content: { type: String },
     timestamp: { type: Date, default: Date.now }
   }],
+  saved_memories: [{ type: String, trim: true }],
 }, { timestamps: true });
 
 export default mongoose.model<IUserProfile>('UserProfile', UserProfileSchema);

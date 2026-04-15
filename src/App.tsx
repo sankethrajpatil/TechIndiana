@@ -355,8 +355,8 @@ function VoiceAgent() {
         } else if (msg.type === 'error') {
           console.error(`[Phase3 Error] Server reported error: ${msg.message}`);
           setError(msg.message);
-        } else if (msg.type === 'study_plan_preview') {
-          console.log('[Phase3] Study plan preview received from server.');
+        } else if (msg.type === 'study_plan_ready') {
+          console.log('[Phase3] Enhanced study plan received from server.');
           setStudyPlanPreview(msg.plan);
         } else if (msg.type === 'ui_redirect') {
           console.log(`[Phase3] UI redirect triggered to: ${msg.route}`);
@@ -784,8 +784,20 @@ function VoiceAgent() {
                 </AnimatePresence>
 
                 {error && (
-                  <div className="absolute bottom-4 left-4 right-4 bg-red-500/20 border border-red-500/40 p-3 rounded-xl text-red-200 text-sm">
-                    {error}
+                  <div className="absolute bottom-4 left-4 right-4 bg-red-600 border border-red-700 p-4 rounded-xl text-white text-sm font-bold shadow-2xl z-50 flex items-center gap-3">
+                    <div className="bg-white/20 p-2 rounded-lg">
+                      <MicOff className="w-5 h-5" />
+                    </div>
+                    <div className="flex-1">
+                      <p className="uppercase tracking-widest text-[10px] opacity-80 mb-1">System Error</p>
+                      <p>{error}</p>
+                    </div>
+                    <button 
+                      onClick={() => setError(null)}
+                      className="text-white underline text-xs font-bold px-2 py-1 hover:bg-black/10 rounded-md transition-all"
+                    >
+                      Clear
+                    </button>
                   </div>
                 )}
               </div>
@@ -822,7 +834,7 @@ function VoiceAgent() {
                         <div className="bg-blue-600 p-2 rounded-xl">
                           <Sparkles className="w-6 h-6 text-white" />
                         </div>
-                        <h3 className="text-xl font-bold">New Plan Preview</h3>
+                        <h3 className="text-xl font-bold">Skill Gap Analysis</h3>
                       </div>
                       <button 
                         onClick={() => setStudyPlanPreview(null)}
@@ -832,16 +844,78 @@ function VoiceAgent() {
                       </button>
                     </div>
 
-                    <div className="space-y-4">
-                      <h4 className="text-2xl font-black tracking-tight">{studyPlanPreview.plan_title}</h4>
-                      <ul className="space-y-2">
-                        {studyPlanPreview.action_items.map((item, i) => (
-                          <li key={i} className="flex gap-2 text-sm">
-                            <span className="text-blue-600 font-bold">•</span>
-                            {item}
-                          </li>
-                        ))}
-                      </ul>
+                    <div className="space-y-6">
+                      <div>
+                        <h4 className="text-2xl font-black tracking-tight">{studyPlanPreview.plan_title}</h4>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {studyPlanPreview.missing_skills?.map((skill, i) => (
+                            <span key={i} className="text-[10px] font-bold uppercase tracking-widest bg-red-500/10 text-red-500 px-2 py-1 rounded-md border border-red-500/20">
+                              Gap: {skill}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="space-y-4">
+                        <h5 className="text-xs font-bold uppercase tracking-widest text-[var(--text-secondary)]">Your Timeline</h5>
+                        <div className="space-y-4">
+                          {studyPlanPreview.milestones?.map((m, i) => (
+                            <div key={i} className="relative pl-6 border-l-2 border-blue-600/30 py-1">
+                                <div className="absolute left-[-9px] top-2 w-4 h-4 rounded-full bg-blue-600 border-4 border-slate-900"></div>
+                                <p className="text-[10px] font-bold text-blue-500 uppercase">{m.date}</p>
+                                <h6 className="font-bold text-sm">{m.topic}</h6>
+                                <ul className="mt-1 space-y-1">
+                                  {m.action_items.map((action, j) => (
+                                    <li key={j} className="text-xs text-[var(--text-secondary)] flex gap-2">
+                                      <span className="text-blue-500">•</span> {action}
+                                    </li>
+                                  ))}
+                                </ul>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {studyPlanPreview.videos && studyPlanPreview.videos.length > 0 && (
+                        <div className="space-y-4 pt-4 border-t border-[var(--border-color)]">
+                          <h5 className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-[var(--text-secondary)]">
+                            <span className="bg-red-600 w-2 h-2 rounded-full animate-pulse"></span>
+                            Recommended Tutorials
+                          </h5>
+                          <div className="grid grid-cols-1 gap-3">
+                            {studyPlanPreview.videos.map((video, idx) => (
+                              <a 
+                                key={idx} 
+                                href={video.url} 
+                                target="_blank" 
+                                rel="noopener noreferrer"
+                                className="group flex items-center gap-4 p-3 bg-white/5 rounded-2xl hover:bg-white/10 transition-all border border-white/10"
+                              >
+                                <div className="relative w-24 h-16 flex-shrink-0">
+                                  <img 
+                                    src={video.thumbnail} 
+                                    alt={video.title} 
+                                    className="w-full h-full object-cover rounded-lg"
+                                  />
+                                  <div className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg">
+                                    <div className="w-8 h-8 bg-red-600 rounded-full flex items-center justify-center">
+                                      <div className="w-0 h-0 border-t-[5px] border-t-transparent border-l-[8px] border-l-white border-b-[5px] border-b-transparent ml-1"></div>
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="flex-1 overflow-hidden">
+                                  <p className="text-xs font-bold line-clamp-2 leading-tight group-hover:text-blue-400 transition-colors">
+                                    {video.title}
+                                  </p>
+                                  <p className="text-[10px] text-[var(--text-secondary)] mt-1 truncate">
+                                    {video.channel}
+                                  </p>
+                                </div>
+                              </a>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     <button
@@ -872,13 +946,45 @@ function VoiceAgent() {
                           try {
                             const parsed = JSON.parse(studyPlan);
                             return (
-                              <div className="space-y-4">
-                                <h4 className="text-lg font-bold">{parsed.plan_title}</h4>
-                                <ul className="space-y-2">
-                                  {parsed.action_items.map((item: string, i: number) => (
-                                    <li key={i} className="flex gap-2">• {item}</li>
+                              <div className="space-y-6">
+                                <div>
+                                  <h4 className="text-lg font-bold">{parsed.plan_title}</h4>
+                                  <div className="mt-2 flex flex-wrap gap-2">
+                                    {parsed.missing_skills?.map((skill: string, i: number) => (
+                                      <span key={i} className="text-[10px] font-bold uppercase tracking-widest bg-white/20 px-2 py-0.5 rounded border border-white/30">
+                                        Goal: {skill}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                                
+                                <div className="space-y-4">
+                                  {parsed.milestones?.map((m: any, i: number) => (
+                                    <div key={i} className="relative pl-6 border-l-2 border-white/20 py-1">
+                                        <div className="absolute left-[-7px] top-2 w-3 h-3 rounded-full bg-white"></div>
+                                        <p className="text-[10px] font-bold text-white/70 uppercase">{m.date}</p>
+                                        <h6 className="font-bold text-sm">{m.topic}</h6>
+                                        <ul className="mt-1 space-y-1">
+                                          {m.action_items.map((action: string, j: number) => (
+                                            <li key={j} className="text-xs text-white/80 flex gap-2">
+                                              <span>•</span> {action}
+                                            </li>
+                                          ))}
+                                        </ul>
+                                    </div>
                                   ))}
-                                </ul>
+                                </div>
+
+                                {parsed.videos && parsed.videos.length > 0 && (
+                                  <div className="pt-4 border-t border-white/10 space-y-3">
+                                    <p className="text-[10px] font-bold uppercase tracking-widest text-white/60">Saved Tutorials</p>
+                                    <div className="grid grid-cols-1 gap-2">
+                                      {parsed.videos.map((vid: any, idx: number) => (
+                                        <a key={idx} href={vid.url} target="_blank" className="text-xs font-bold hover:underline block truncate">• {vid.title}</a>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
                               </div>
                             );
                           } catch (e) {

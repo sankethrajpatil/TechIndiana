@@ -15,6 +15,7 @@ import { firebaseAuthMiddleware, verifyWebSocketToken } from './src/middleware/a
 import sessionRouter from './server/routes/session';
 import { createCalendarEvent } from './server/services/calendarService';
 import { sendResourceEmail } from './server/services/emailService';
+import { fetchVideosForSkills } from './server/services/youtubeService';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -247,20 +248,32 @@ async function startServer() {
     }
   };
 
-  const presentStudyPlanTool: FunctionDeclaration = {
-    name: "present_study_plan",
-    description: "Presents a generated study plan to the user on their screen.",
+  const generateYoutubeStudyPlanTool: FunctionDeclaration = {
+    name: "generate_youtube_study_plan",
+    description: "Generates a dated study plan timeline and fetches relevant YouTube tutorial videos for missing skills.",
     parameters: {
       type: Type.OBJECT,
       properties: {
-        plan_title: { type: Type.STRING, description: "The title of the study plan." },
-        action_items: { 
+        plan_title: { type: Type.STRING, description: "The overarching title of the study plan." },
+        missing_skills: { 
           type: Type.ARRAY, 
           items: { type: Type.STRING },
-          description: "A list of specific steps or topics to study." 
+          description: "A list of 2-3 specific technical skills the user currently lacks for their goal." 
+        },
+        milestones: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              date: { type: Type.STRING, description: "The milestone date starting from today April 10, 2026 (Format: Month Day, Year)." },
+              topic: { type: Type.STRING, description: "Short heading for this milestone." },
+              action_items: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Specific steps to take." }
+            },
+            required: ["date", "topic", "action_items"]
+          }
         }
       },
-      required: ["plan_title", "action_items"]
+      required: ["plan_title", "missing_skills", "milestones"]
     }
   };
 
@@ -353,6 +366,18 @@ async function startServer() {
     }
   };
 
+  const extractAndSaveMemoryTool: FunctionDeclaration = {
+    name: "extract_and_save_memory",
+    description: "Use this tool whenever the user shares a new, important personal fact, preference, roadblock, or career aspiration. This saves the fact to their permanent profile.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        memory_fact: { type: Type.STRING, description: "A concise, 1-sentence summary of the important fact to remember." }
+      },
+      required: ["memory_fact"]
+    }
+  };
+
   const showPathwayComparisonTool: FunctionDeclaration = {
     name: "show_pathway_comparison",
     description: "Pushes a visual, side-by-side comparison of the TechIndiana Apprenticeship vs. Traditional 4-Year College to the user's screen. Use this when a parent asks how the program compares to college, or asks about costs, timelines, and outcomes.",
@@ -421,10 +446,38 @@ async function startServer() {
       let profile = null;
       if (isMongoConnected) {
         profile = await UserProfile.findOne({ firebaseUid: uid });
+        
+        // If profile doesn't exist, try to create a basic one from Firebase Auth
+        if (!profile) {
+          try {
+            const userRecord = await admin.auth().getUser(uid);
+            profile = await UserProfile.findOneAndUpdate(
+              { firebaseUid: uid },
+              { 
+                name: userRecord.displayName || "Student",
+                email: userRecord.email
+              },
+              { new: true, upsert: true }
+            );
+            console.log(`[Phase3 Init] 🆕 Created new profile for UID: ${uid} (Name: ${profile.name})`);
+          } catch (e) {
+            console.warn(`[Phase3 Init] Could not fetch user from Firebase Admin:`, e);
+          }
+        }
       }
       
       // 2. Connect to Gemini Live API
-      const systemInstruction = `You are the official voice-based academic advisor for TechIndiana. Your tone is upbeat, technical, encouraging, and welcoming. Ask the student for their name to get started.`;
+      let memoryInjection = "";
+      const userName = profile?.name || "Student";
+
+      if (profile && profile.saved_memories && profile.saved_memories.length > 0) {
+        memoryInjection = `\n\n### User's Past Memories:\n- ${profile.saved_memories.join('\n- ')}\n\nReview the past memories above. Welcome ${userName} back naturally and use these facts to personalize your advice. Do not ask for their name or any information already mentioned in these memories.`;
+        console.log(`[Phase3 Gemini] 🧠 Injecting ${profile.saved_memories.length} past memories for ${uid}.`);
+      }
+
+      const systemInstruction = `You are the official voice-based academic advisor for TechIndiana. Your tone is upbeat, technical, encouraging, and welcoming. You are currently speaking with ${userName}. Address them by name. 
+
+When a user shares their background, strictly analyze their current skills vs. their career goal and verbally identify the exact gap. When they ask for a course of action, invoke the 'generate_youtube_study_plan' tool. Include specific dates for each milestone, starting from today: April 10, 2026. Do not ask for their name as you already have it.${memoryInjection}`;
       
       try {
         console.log(`[Gemini Handshake] Connecting with model: gemini-2.5-flash-native-audio-preview-12-2025 for UID: ${uid}`);
@@ -446,7 +499,7 @@ async function startServer() {
               {
                 functionDeclarations: [
                   saveUserProfileTool,
-                  presentStudyPlanTool,
+                  generateYoutubeStudyPlanTool,
                   saveConversationSummaryTool,
                   routeUserToPersonaPageTool,
                   schedulePartnershipCallTool,
@@ -454,7 +507,8 @@ async function startServer() {
                   sendCounselorToolkitTool,
                   sendParentGuideTool,
                   assessAdultSkillsTool,
-                  showPathwayComparisonTool
+                  showPathwayComparisonTool,
+                  extractAndSaveMemoryTool
                 ]
               }
             ]
@@ -476,10 +530,12 @@ async function startServer() {
             console.log(`[Phase3 Gemini] ✅ BidiGenerateContentSetup ACK received — Gemini is READY for ${uid}.`);
             geminiReady = true;
             console.log(`[Phase3 Gemini] Sending initial greeting prompt...`);
+            
+            const userName = profile?.name || "Student";
             geminiSession.sendRealtimeInput({
-              text: "Hello, I am a TechIndiana student. Please introduce yourself and ask for my name."
+              text: `Hello, I am ${userName}, a TechIndiana user. Please greet me by name and ask if I'm ready to continue our career exploration.`
             });
-            console.log(`[Phase3 Gemini] Initial greeting text sent.`);
+            console.log(`[Phase3 Gemini] Initial greeting text sent for user: ${userName}`);
           }
           
           // Handle Transcriptions and save to history
@@ -728,6 +784,75 @@ async function startServer() {
                   }]
                 });
                 console.log(`[Phase4 TOOL CALL] ✅ sendToolResponse sent for "show_pathway_comparison" id="${call.id}". AI should now RESUME.`);
+              } else if (call.name === "generate_youtube_study_plan") {
+                console.log(`[Phase4 TOOL CALL] generate_youtube_study_plan for ${uid}`, call.args);
+                const { plan_title, missing_skills, milestones } = call.args;
+                
+                try {
+                  const videoData = await fetchVideosForSkills(missing_skills);
+                  console.log(`[Phase4 TOOL CALL] 🎥 Fetched ${videoData.length} YouTube videos for missing skills.`);
+                  
+                  ws.send(JSON.stringify({ 
+                    type: 'study_plan_ready', 
+                    plan: { plan_title, missing_skills, milestones, videos: videoData } 
+                  }));
+
+                  geminiSession.sendToolResponse({
+                    functionResponses: [{
+                      name: "generate_youtube_study_plan",
+                      response: { success: true, message: `A study plan with ${videoData.length} YouTube tutorials has been generated and displayed.` },
+                      id: call.id
+                    }]
+                  });
+                } catch (err) {
+                  console.error('Error fetching YouTube videos:', err);
+                  geminiSession.sendToolResponse({
+                    functionResponses: [{
+                      name: "generate_youtube_study_plan",
+                      response: { success: false, error: "Failed to fetch supporting YouTube videos." },
+                      id: call.id
+                    }]
+                  });
+                }
+              } else if (call.name === "extract_and_save_memory") {
+                console.log(`[Phase4 TOOL CALL] extract_and_save_memory for ${uid}`, call.args);
+                const memoryFact = call.args.memory_fact;
+
+                if (isMongoConnected) {
+                  try {
+                    await UserProfile.findOneAndUpdate(
+                      { firebaseUid: uid },
+                      { $push: { saved_memories: memoryFact } }
+                    );
+                    console.log(`[Phase4 TOOL CALL] ✅ Memory saved to MongoDB: "${memoryFact}"`);
+                    
+                    geminiSession.sendToolResponse({
+                      functionResponses: [{
+                        name: "extract_and_save_memory",
+                        response: { success: true, message: "Memory saved to long-term storage." },
+                        id: call.id
+                      }]
+                    });
+                  } catch (err) {
+                    console.error('Error saving memory to MongoDB:', err);
+                    geminiSession.sendToolResponse({
+                      functionResponses: [{
+                        name: "extract_and_save_memory",
+                        response: { success: false, error: "Database error" },
+                        id: call.id
+                      }]
+                    });
+                  }
+                } else {
+                  console.warn('Cannot save memory: MongoDB not connected.');
+                  geminiSession.sendToolResponse({
+                    functionResponses: [{
+                      name: "extract_and_save_memory",
+                      response: { success: false, error: "Database not connected" },
+                      id: call.id
+                    }]
+                  });
+                }
               } else {
                 console.warn(`[Phase4 TOOL CALL] ⚠️  UNHANDLED tool call: "${call.name}" id="${call.id}". AI will be permanently paused! Add a handler.`);
               }

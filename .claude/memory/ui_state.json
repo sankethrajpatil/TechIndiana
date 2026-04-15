@@ -1,0 +1,21 @@
+{
+  "theme": {
+    "mode": "dark",
+    "primary": "#4A4F76",
+    "background": "slate-900",
+    "text": "white"
+  },
+  "navigation": {
+    "activePersona": "student",
+    "currentPath": "/students"
+  },
+  "ui_state": {
+    "studyPlanVisible": false,
+    "comparisonData": {
+      "active": false,
+      "data": []
+    },
+    "isListening": false,
+    "isSpeaking": false
+  }
+}
