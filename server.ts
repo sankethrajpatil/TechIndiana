@@ -466,22 +466,31 @@ async function startServer() {
       if (isMongoConnected) {
         profile = await UserProfile.findOne({ firebaseUid: uid });
         
-        // If profile doesn't exist, try to create a basic one from Firebase Auth
-        if (!profile) {
-          try {
-            const userRecord = await admin.auth().getUser(uid);
+        // Always fetch the latest display name from Firebase Auth
+        let firebaseDisplayName = "Student";
+        try {
+          const userRecord = await admin.auth().getUser(uid);
+          firebaseDisplayName = userRecord.displayName || "Student";
+          
+          if (!profile) {
+            // New user — create profile with Firebase Auth info
             profile = await UserProfile.findOneAndUpdate(
               { firebaseUid: uid },
               { 
-                name: userRecord.displayName || "Student",
+                name: firebaseDisplayName,
                 email: userRecord.email
               },
               { new: true, upsert: true }
             );
             console.log(`[Phase3 Init] 🆕 Created new profile for UID: ${uid} (Name: ${profile.name})`);
-          } catch (e) {
-            console.warn(`[Phase3 Init] Could not fetch user from Firebase Admin:`, e);
+          } else if (!profile.name || profile.name === "Student") {
+            // Existing user with missing/default name — update from Firebase Auth
+            profile.name = firebaseDisplayName;
+            await profile.save();
+            console.log(`[Phase3 Init] 🔄 Updated profile name from Firebase Auth: ${profile.name}`);
           }
+        } catch (e) {
+          console.warn(`[Phase3 Init] Could not fetch user from Firebase Admin:`, e);
         }
       }
       
