@@ -120,7 +120,14 @@ describe('POST /api/session/end', () => {
   it('should format JSON study plan as HTML in email', async () => {
     const planJson = JSON.stringify({
       plan_title: 'Cloud Architect Path',
-      action_items: ['Get AWS Certified', 'Learn Terraform'],
+      missing_skills: ['AWS', 'Terraform'],
+      milestones: [
+        { topic: 'Get AWS Certified', date: 'April 20, 2026', action_items: ['Study for Solutions Architect exam'] },
+        { topic: 'Learn Terraform', date: 'April 27, 2026', action_items: ['Complete Terraform tutorials'] },
+      ],
+      videos: [
+        { title: 'AWS Basics', url: 'https://youtube.com/watch?v=abc', thumbnail: 'https://i.ytimg.com/vi/abc/default.jpg', skill: 'AWS' },
+      ],
     });
 
     mockFindOne.mockResolvedValue({
@@ -144,6 +151,58 @@ describe('POST /api/session/end', () => {
     expect(mailOptions.html).toContain('Cloud Architect Path');
     expect(mailOptions.html).toContain('Get AWS Certified');
     expect(mailOptions.html).toContain('Learn Terraform');
+    expect(mailOptions.html).toContain('AWS Basics');
+    expect(mailOptions.html).toContain('Skills to Develop');
+  });
+
+  it('should fix ALL-CAPS names to title case', async () => {
+    mockFindOne.mockResolvedValue({
+      firebaseUid: 'test-uid',
+      name: 'PRAGATHI RAO',
+      study_plan: null,
+      conversation_summary: 'Talked about product management.',
+    });
+    mockGetUser.mockResolvedValue({
+      email: 'pragathi@test.com',
+      displayName: 'PRAGATHI RAO',
+    });
+    mockSendMail.mockResolvedValue({ response: '250 OK' });
+
+    const app = createApp();
+    await request(app)
+      .post('/api/session/end')
+      .set('Authorization', 'Bearer dev:test-uid');
+
+    const mailOptions = mockSendMail.mock.calls[0][0];
+    expect(mailOptions.html).toContain('Hello Pragathi Rao');
+    expect(mailOptions.html).not.toContain('PRAGATHI RAO');
+  });
+
+  it('should build summary from conversation history when no summary saved', async () => {
+    mockFindOne.mockResolvedValue({
+      firebaseUid: 'test-uid',
+      name: 'Alex',
+      study_plan: null,
+      conversation_summary: null,
+      conversation_history: [
+        { role: 'user', content: 'I want to learn cloud computing', timestamp: new Date() },
+        { role: 'model', content: 'Great choice! Let me help you plan.', timestamp: new Date() },
+      ],
+    });
+    mockGetUser.mockResolvedValue({
+      email: 'alex@test.com',
+      displayName: 'Alex',
+    });
+    mockSendMail.mockResolvedValue({ response: '250 OK' });
+
+    const app = createApp();
+    await request(app)
+      .post('/api/session/end')
+      .set('Authorization', 'Bearer dev:test-uid');
+
+    const mailOptions = mockSendMail.mock.calls[0][0];
+    expect(mailOptions.html).toContain('I want to learn cloud computing');
+    expect(mailOptions.html).toContain('Great choice!');
   });
 
   it('should fallback to plain text when study_plan is not valid JSON', async () => {
