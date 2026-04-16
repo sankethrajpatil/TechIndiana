@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { GoogleGenAI, Modality, Type, FunctionDeclaration } from "@google/genai";
 import { signInWithPopup, GoogleAuthProvider, onAuthStateChanged, User } from 'firebase/auth';
 import { auth } from './firebase';
-import { Mic, MicOff, LogIn, LogOut, BookOpen, Sparkles, Loader2, CheckCircle2, Users, GraduationCap, Briefcase, UserCircle, Sun, Moon } from 'lucide-react';
+import { Mic, MicOff, LogIn, LogOut, BookOpen, Sparkles, Loader2, CheckCircle2, Users, GraduationCap, Briefcase, UserCircle, Sun, Moon, ShieldAlert, ArrowLeft } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { BrowserRouter, Routes, Route, useNavigate, Link } from 'react-router-dom';
 import UserProfilePage from './UserProfilePage';
@@ -134,13 +134,15 @@ function VoiceAgent() {
   const [studyPlanPreview, setStudyPlanPreview] = useState<{ plan_title: string, action_items: string[] } | null>(null);
   const [isSavingPlan, setIsSavingPlan] = useState(false);
   const [isEndingSession, setIsEndingSession] = useState(false);
+  const [loginMode, setLoginMode] = useState<'student' | 'counselor' | null>(null);
+  const [counselorDenied, setCounselorDenied] = useState(false);
 
   // --- Firebase Auth ---
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
       setUser(u);
       if (u) {
-        // Fetch study plan from MongoDB via API
+        // Fetch profile from MongoDB via API
         try {
           const token = await u.getIdToken();
           const res = await fetch('/api/profile', {
@@ -151,6 +153,16 @@ function VoiceAgent() {
             if (data.profile?.study_plan) {
               setStudyPlan(data.profile.study_plan);
             }
+            // If user logged in via "Counselor Portal", check their role
+            if (loginMode === 'counselor') {
+              const role = data.profile?.role || 'student';
+              if (role === 'counselor' || role === 'admin') {
+                navigate('/counselors/dashboard');
+              } else {
+                setCounselorDenied(true);
+              }
+              setLoginMode(null);
+            }
           }
         } catch (err) {
           console.error("Error fetching profile:", err);
@@ -158,7 +170,7 @@ function VoiceAgent() {
       }
     });
     return () => unsubscribe();
-  }, []);
+  }, [loginMode]);
 
   const handleSavePlan = async () => {
     if (!user || !studyPlanPreview) return;
@@ -188,17 +200,21 @@ function VoiceAgent() {
     }
   };
 
-  const handleLogin = async () => {
+  const handleLogin = async (mode: 'student' | 'counselor' = 'student') => {
     try {
+      setLoginMode(mode);
       const provider = new GoogleAuthProvider();
       await signInWithPopup(auth, provider);
     } catch (err) {
+      setLoginMode(null);
       setError("Login failed. Please try again.");
       console.error(err);
     }
   };
 
   const handleLogout = async () => {
+    setCounselorDenied(false);
+    setLoginMode(null);
     await auth.signOut();
     await stopConversation();
   };
@@ -584,7 +600,7 @@ function VoiceAgent() {
             </div>
           ) : (
             <button 
-              onClick={handleLogin}
+              onClick={() => handleLogin('student')}
               className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-full font-semibold hover:bg-blue-700 transition-all active:scale-95 shadow-lg shadow-blue-600/20"
             >
               <LogIn className="w-4 h-4" />
@@ -611,17 +627,65 @@ function VoiceAgent() {
               </p>
             </motion.div>
             
-            <motion.button
+            <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ delay: 0.4 }}
-              onClick={handleLogin}
-              className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-4 rounded-2xl font-bold text-xl shadow-2xl shadow-blue-600/20 transition-all active:scale-95 flex items-center gap-3 mx-auto"
+              className="flex flex-col sm:flex-row items-center justify-center gap-4"
             >
-              Get Started
-              <Sparkles className="w-6 h-6" />
-            </motion.button>
+              <button
+                onClick={() => handleLogin('student')}
+                className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-4 rounded-2xl font-bold text-lg shadow-2xl shadow-blue-600/20 transition-all active:scale-95 flex items-center gap-3 w-full sm:w-auto justify-center"
+              >
+                <Sparkles className="w-5 h-5" />
+                Explore My Future
+              </button>
+              <button
+                onClick={() => handleLogin('counselor')}
+                className="bg-[#4A4F76] hover:bg-[#3a3f66] text-white px-8 py-4 rounded-2xl font-bold text-lg shadow-2xl shadow-[#4A4F76]/20 transition-all active:scale-95 flex items-center gap-3 w-full sm:w-auto justify-center"
+              >
+                <BookOpen className="w-5 h-5" />
+                Counselor Portal
+              </button>
+            </motion.div>
           </div>
+        ) : counselorDenied ? (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="text-center space-y-6 py-20 max-w-lg mx-auto"
+          >
+            <div className="w-24 h-24 bg-orange-100 dark:bg-orange-900/30 rounded-full flex items-center justify-center mx-auto">
+              <ShieldAlert className="w-12 h-12 text-orange-500" />
+            </div>
+            <h2 className="text-3xl font-black tracking-tight">
+              Whoa there, overachiever! 🎓
+            </h2>
+            <p className="text-[var(--text-secondary)] text-lg leading-relaxed">
+              Looks like you tried to sneak into the <span className="font-bold text-[#4A4F76]">Counselor Portal</span>, 
+              but your account is set up as a <span className="font-bold text-blue-600">student</span>. 
+              That's like bringing a backpack to a teacher's lounge — bold move, but no dice.
+            </p>
+            <p className="text-[var(--text-secondary)]">
+              If you <em>are</em> a counselor, ask your administrator to grant you access.
+            </p>
+            <div className="flex flex-col sm:flex-row gap-3 justify-center pt-4">
+              <button
+                onClick={() => setCounselorDenied(false)}
+                className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-xl font-bold transition-all flex items-center gap-2 justify-center"
+              >
+                <Sparkles className="w-4 h-4" />
+                Explore My Future Instead
+              </button>
+              <button
+                onClick={handleLogout}
+                className="border border-[var(--border-color)] text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] px-6 py-3 rounded-xl font-bold transition-all flex items-center gap-2 justify-center"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                Back to Home
+              </button>
+            </div>
+          </motion.div>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
             {/* Advisor Interaction Area */}

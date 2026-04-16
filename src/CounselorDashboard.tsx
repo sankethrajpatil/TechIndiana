@@ -15,6 +15,8 @@ import {
   ChevronUp,
   GraduationCap,
   Loader2,
+  ShieldAlert,
+  Sparkles,
 } from 'lucide-react';
 
 interface StudentProfile {
@@ -40,6 +42,7 @@ export default function CounselorDashboard() {
   const [filter, setFilter] = useState<'all' | 'mine' | 'unassigned'>('all');
   const [theme, setTheme] = useState(localStorage.getItem('theme') || 'light');
   const [userRole, setUserRole] = useState<string | null>(null);
+  const [accessDenied, setAccessDenied] = useState(false);
 
   useEffect(() => {
     if (theme === 'dark') {
@@ -75,7 +78,10 @@ export default function CounselorDashboard() {
   }, []);
 
   useEffect(() => {
-    if (!loading && (!user || (userRole && userRole !== 'counselor' && userRole !== 'admin'))) {
+    if (!loading && user && userRole && userRole !== 'counselor' && userRole !== 'admin') {
+      setAccessDenied(true);
+    }
+    if (!loading && !user) {
       navigate('/', { replace: true });
     }
   }, [loading, user, userRole, navigate]);
@@ -165,6 +171,45 @@ export default function CounselorDashboard() {
     return (
       <div className="min-h-screen bg-[var(--bg-primary)] text-[var(--text-primary)] flex items-center justify-center font-sans">
         <Loader2 className="w-8 h-8 animate-spin text-[#4A4F76]" />
+      </div>
+    );
+  }
+
+  if (accessDenied) {
+    return (
+      <div className="min-h-screen bg-[var(--bg-primary)] text-[var(--text-primary)] font-sans flex items-center justify-center px-6">
+        <div className="text-center space-y-6 max-w-lg">
+          <div className="w-24 h-24 bg-orange-100 dark:bg-orange-900/30 rounded-full flex items-center justify-center mx-auto">
+            <ShieldAlert className="w-12 h-12 text-orange-500" />
+          </div>
+          <h2 className="text-3xl font-black tracking-tight">
+            Whoa there, overachiever! 🎓
+          </h2>
+          <p className="text-[var(--text-secondary)] text-lg leading-relaxed">
+            Looks like you tried to sneak into the <span className="font-bold text-[#4A4F76]">Counselor Portal</span>,
+            but your account is set up as a <span className="font-bold text-blue-600">student</span>.
+            That's like bringing a backpack to a teacher's lounge — bold move, but no dice.
+          </p>
+          <p className="text-[var(--text-secondary)]">
+            If you <em>are</em> a counselor, ask your administrator to grant you access.
+          </p>
+          <div className="flex flex-col sm:flex-row gap-3 justify-center pt-4">
+            <Link
+              to="/"
+              className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-xl font-bold transition-all flex items-center gap-2 justify-center"
+            >
+              <Sparkles className="w-4 h-4" />
+              Explore My Future Instead
+            </Link>
+            <button
+              onClick={() => { auth.signOut(); navigate('/'); }}
+              className="border border-[var(--border-color)] text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] px-6 py-3 rounded-xl font-bold transition-all flex items-center gap-2 justify-center"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              Back to Home
+            </button>
+          </div>
+        </div>
       </div>
     );
   }
