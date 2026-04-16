@@ -125,6 +125,7 @@ function VoiceAgent() {
   const sessionRef = useRef<any>(null);
   const audioQueueRef = useRef<AudioBuffer[]>([]);
   const isPlayingRef = useRef(false);
+  const currentSourceRef = useRef<AudioBufferSourceNode | null>(null);
   // Turn-taking: true while the AI is streaming audio — mic is muted during this window
   const isAISpeakingRef = useRef(false);
   const pauseMicRef = useRef<(() => void) | null>(null);
@@ -245,7 +246,9 @@ function VoiceAgent() {
     const source = audioContextRef.current.createBufferSource();
     source.buffer = buffer;
     source.connect(audioContextRef.current.destination);
+    currentSourceRef.current = source;
     source.onended = () => {
+      currentSourceRef.current = null;
       isPlayingRef.current = false;
       playNextInQueue();
     };
@@ -309,6 +312,16 @@ function VoiceAgent() {
         setIsConnected(false);
         setIsRecording(false);
         isAISpeakingRef.current = false;  // always unmute on disconnect
+
+        // Stop any in-flight audio playback and drain the queue so the AI
+        // doesn't keep talking after the socket is gone.
+        audioQueueRef.current = [];
+        isPlayingRef.current = false;
+        if (currentSourceRef.current) {
+          try { currentSourceRef.current.stop(); } catch (_) { /* already stopped */ }
+          currentSourceRef.current = null;
+        }
+
         // Stop stream tracks and disconnect processor, but do NOT close the AudioContext here.
         // Closing it here creates a race condition: if ws closes while startMic() is awaiting
         // getUserMedia, stopMic() destroys the context and the mic never starts.

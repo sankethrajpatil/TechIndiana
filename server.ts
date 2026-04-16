@@ -542,17 +542,42 @@ async function startServer() {
 
     let clientAudioChunks = 0;
     let geminiAudioChunks = 0;
+    let geminiSession: any = null;
+    let geminiReady = false;
+    let wsAlive = true;
+
+    // Safe send: only send if socket is still open
+    const safeSend = (data: string) => {
+      if (ws.readyState === ws.OPEN) {
+        ws.send(data);
+      }
+    };
+
+    // Ping/pong heartbeat to detect dead connections before Cloud Run kills them
+    const pingInterval = setInterval(() => {
+      if (!wsAlive) {
+        console.log(`[Heartbeat] ❌ No pong from ${uid} — terminating.`);
+        ws.terminate();
+        return;
+      }
+      wsAlive = false;
+      ws.ping();
+    }, 30000);
+    ws.on('pong', () => { wsAlive = true; });
     
     ws.on('error', (err) => {
       console.error(`[Phase3 ERROR] ❌ WebSocket Server Error for ${uid}:`, err);
     });
 
+    // Single close handler — tears down Gemini regardless of when it was created
     ws.on('close', (code, reason) => {
       console.log(`[Phase3 DISCONNECT] ⚠️  Client disconnected. UID: ${uid} | Code: ${code} | Reason: ${reason?.toString() || 'none'}`);
+      clearInterval(pingInterval);
+      if (geminiSession) {
+        geminiSession.close();
+        geminiSession = null;
+      }
     });
-
-    let geminiSession: any = null;
-    let geminiReady = false;
     let aiTurnActive = false;  // true while Gemini is streaming audio in the current turn
     const geminiApiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
     if (!geminiApiKey) {
@@ -665,7 +690,7 @@ When a user shares their background, strictly analyze their current skills vs. t
             },
             onerror: (err: any) => {
               console.error(`[Phase3 Gemini] ❌ Gemini session ERROR for ${uid}:`, err);
-              ws.send(JSON.stringify({ type: 'error', message: 'Gemini connection error.' }));
+              safeSend(JSON.stringify({ type: 'error', message: 'Gemini connection error.' }));
             },
             onmessage: async (msg: any) => {
           if (msg.setupComplete) {
@@ -691,7 +716,7 @@ When a user shares their background, strictly analyze their current skills vs. t
                   { $push: { conversation_history: { role: 'model', content: textPart.text, timestamp: new Date() } } }
                 );
               }
-              ws.send(JSON.stringify({ type: 'transcript', role: 'Advisor', text: textPart.text }));
+              safeSend(JSON.stringify({ type: 'transcript', role: 'Advisor', text: textPart.text }));
             }
 
             // Forward audio from Gemini to Client
@@ -701,13 +726,13 @@ When a user shares their background, strictly analyze their current skills vs. t
                 if (!aiTurnActive) {
                   aiTurnActive = true;
                   console.log(`[Turn] 🔇 AI started speaking — sending speech_start`);
-                  ws.send(JSON.stringify({ type: 'speech_start' }));
+                  safeSend(JSON.stringify({ type: 'speech_start' }));
                 }
                 geminiAudioChunks++;
                 if (geminiAudioChunks % 50 === 1) {
                   console.log(`[Phase3 Audio] 🔊 Gemini audio chunk #${geminiAudioChunks} → forwarding to client. Data length: ${part.inlineData.data?.length ?? 0}`);
                 }
-                ws.send(JSON.stringify({ type: 'audio', data: part.inlineData.data }));
+                safeSend(JSON.stringify({ type: 'audio', data: part.inlineData.data }));
               }
             }
           }
@@ -716,14 +741,14 @@ When a user shares their background, strictly analyze their current skills vs. t
           if (msg.serverContent?.turnComplete && aiTurnActive) {
             aiTurnActive = false;
             console.log(`[Turn] 🎤 AI turn complete — sending speech_end`);
-            ws.send(JSON.stringify({ type: 'speech_end' }));
+            safeSend(JSON.stringify({ type: 'speech_end' }));
           }
 
           // User interrupted AI → also end the turn signal
           if (msg.serverContent?.interrupted && aiTurnActive) {
             aiTurnActive = false;
             console.log(`[Turn] ⚡ AI interrupted — sending speech_end`);
-            ws.send(JSON.stringify({ type: 'speech_end' }));
+            safeSend(JSON.stringify({ type: 'speech_end' }));
           }
 
           // Handle user transcriptions if enabled
@@ -736,7 +761,7 @@ When a user shares their background, strictly analyze their current skills vs. t
                 { $push: { conversation_history: { role: 'user', content: userText, timestamp: new Date() } } }
               );
             }
-            ws.send(JSON.stringify({ type: 'transcript', role: 'User', text: userText }));
+            safeSend(JSON.stringify({ type: 'transcript', role: 'User', text: userText }));
           }
 
           // Handle Tool Calls
@@ -760,7 +785,7 @@ When a user shares their background, strictly analyze their current skills vs. t
                       id: call.id
                     }]
                   });
-                  ws.send(JSON.stringify({ type: 'error', message: 'Database not configured. Profile not saved.' }));
+                  safeSend(JSON.stringify({ type: 'error', message: 'Database not configured. Profile not saved.' }));
                   continue;
                 }
 
@@ -780,7 +805,7 @@ When a user shares their background, strictly analyze their current skills vs. t
                   });
                   console.log(`[Phase4 TOOL CALL] ✅ sendToolResponse sent for "save_user_profile" id="${call.id}". AI should now RESUME.`);
                   
-                  ws.send(JSON.stringify({ type: 'status', message: 'Profile saved successfully.' }));
+                  safeSend(JSON.stringify({ type: 'status', message: 'Profile saved successfully.' }));
                 } catch (err) {
                   console.error('Error in tool call:', err);
                   geminiSession.sendToolResponse({
@@ -793,7 +818,7 @@ When a user shares their background, strictly analyze their current skills vs. t
                 }
               } else if (call.name === "present_study_plan") {
                 console.log(`[Phase4 TOOL CALL] present_study_plan for ${uid}`, call.args);
-                ws.send(JSON.stringify({ type: 'study_plan_preview', plan: call.args }));
+                safeSend(JSON.stringify({ type: 'study_plan_preview', plan: call.args }));
                 geminiSession.sendToolResponse({
                   functionResponses: [{
                     name: "present_study_plan",
@@ -842,7 +867,7 @@ When a user shares their background, strictly analyze their current skills vs. t
                 }
               } else if (call.name === "route_user_to_persona_page") {
                 console.log(`[Phase4 TOOL CALL] route_user_to_persona_page for ${uid}`, call.args);
-                ws.send(JSON.stringify({ type: 'ui_redirect', route: call.args.target_route }));
+                safeSend(JSON.stringify({ type: 'ui_redirect', route: call.args.target_route }));
                 geminiSession.sendToolResponse({
                   functionResponses: [{
                     name: "route_user_to_persona_page",
@@ -854,7 +879,7 @@ When a user shares their background, strictly analyze their current skills vs. t
               } else if (call.name === "schedule_partnership_call") {
                 console.log(`[Phase4 TOOL CALL] schedule_partnership_call for ${uid}`, call.args);
                 const eventLink = await createCalendarEvent(`Partnership Call: ${call.args.company_name} x TechIndiana`, `Partnership discussion.`, call.args.preferred_date, call.args.preferred_time);
-                ws.send(JSON.stringify({ type: 'meeting_scheduled', event_link: eventLink }));
+                safeSend(JSON.stringify({ type: 'meeting_scheduled', event_link: eventLink }));
                 geminiSession.sendToolResponse({
                   functionResponses: [{
                     name: "schedule_partnership_call",
@@ -866,7 +891,7 @@ When a user shares their background, strictly analyze their current skills vs. t
               } else if (call.name === "schedule_advisor_call") {
                 console.log(`[Phase4 TOOL CALL] schedule_advisor_call for ${uid}`, call.args);
                 const eventLink = await createCalendarEvent(`Advisor Call: ${call.args.attendee_name}`, `Topic: ${call.args.topic}`, call.args.preferred_date, call.args.preferred_time);
-                ws.send(JSON.stringify({ type: 'meeting_scheduled', event_link: eventLink }));
+                safeSend(JSON.stringify({ type: 'meeting_scheduled', event_link: eventLink }));
                 geminiSession.sendToolResponse({
                   functionResponses: [{
                     name: "schedule_advisor_call",
@@ -917,7 +942,7 @@ When a user shares their background, strictly analyze their current skills vs. t
                 console.log(`[Phase4 TOOL CALL] ✅ sendToolResponse sent for "assess_adult_skills" id="${call.id}". AI should now RESUME.`);
               } else if (call.name === "show_pathway_comparison") {
                 console.log(`[Phase4 TOOL CALL] show_pathway_comparison for ${uid}`, call.args);
-                ws.send(JSON.stringify({ type: 'render_comparison', data: call.args.comparison_points }));
+                safeSend(JSON.stringify({ type: 'render_comparison', data: call.args.comparison_points }));
                 geminiSession.sendToolResponse({
                   functionResponses: [{
                     name: "show_pathway_comparison",
@@ -950,7 +975,7 @@ When a user shares their background, strictly analyze their current skills vs. t
                     }
                   }
 
-                  ws.send(JSON.stringify({ 
+                  safeSend(JSON.stringify({ 
                     type: 'study_plan_ready', 
                     plan: planPayload
                   }));
@@ -1023,7 +1048,7 @@ When a user shares their background, strictly analyze their current skills vs. t
 
       } catch (err: any) {
         console.error('CRITICAL: Gemini connection failed during connect():', err);
-        ws.send(JSON.stringify({ type: 'error', message: 'Gemini service failed to start.' }));
+        safeSend(JSON.stringify({ type: 'error', message: 'Gemini service failed to start.' }));
         ws.close();
         return;
       }
@@ -1052,15 +1077,12 @@ When a user shares their background, strictly analyze their current skills vs. t
         }
       });
 
-      ws.on('close', () => {
-        console.log(`Client disconnected: ${uid}`);
-        geminiSession?.close();
-      });
+      // Close handler is already registered above — no duplicate needed here.
 
     } catch (error) {
       console.error('Error in WebSocket connection:', error);
       if (ws.readyState === ws.OPEN) {
-        ws.send(JSON.stringify({ type: 'error', message: 'Failed to initialize voice agent.' }));
+        safeSend(JSON.stringify({ type: 'error', message: 'Failed to initialize voice agent.' }));
       }
       ws.close();
     }
